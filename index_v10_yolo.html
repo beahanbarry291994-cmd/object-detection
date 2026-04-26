@@ -132,22 +132,27 @@ body, html {
 #settings-modal.show .modal-content { transform: translateY(0); }
 
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; position: sticky; top: 0; z-index: 2;}
-.modal-header h2 { font-size: 18px; font-weight: 600; margin: 0; }
+.modal-header h2 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: 0.5px; }
 .btn-close {
   width: 30px; height: 30px; border-radius: 15px; background: rgba(255,255,255,0.1); border: none; color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px;
 }
 
-.setting-row { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 0.5px solid rgba(255,255,255,0.1); }
+.setting-row { 
+  display: flex; justify-content: space-between; align-items: center; 
+  padding: 16px 0; border-bottom: 0.5px solid rgba(255,255,255,0.1); 
+}
 .setting-row:last-child { border-bottom: none; }
-.setting-info h3 { font-size: 15px; font-weight: 500; margin: 0 0 4px 0; }
+.setting-info { flex: 1; padding-right: 16px; } /* 保证文字不挤压右侧控件 */
+.setting-info h3 { font-size: 15px; font-weight: 500; margin: 0 0 6px 0; letter-spacing: 0.5px;}
 .setting-info p { font-size: 12px; color: var(--text-sub); margin: 0; line-height: 1.4;}
 
 .apple-select {
+  flex-shrink: 0; /* 强制对齐边缘 */
   background: rgba(255,255,255,0.1); color: white; border: none; padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 500; outline: none; appearance: none; text-align: right; cursor: pointer; max-width: 140px;
 }
 .apple-select option { background: #222; color: white; }
 
-.toggle-switch { width: 46px; height: 26px; background: #39393d; border-radius: 13px; position: relative; cursor: pointer; transition: background 0.3s; flex-shrink: 0;}
+.toggle-switch { flex-shrink: 0; /* 强制对齐边缘 */ width: 46px; height: 26px; background: #39393d; border-radius: 13px; position: relative; cursor: pointer; transition: background 0.3s;}
 .toggle-switch.on { background: var(--apple-green); }
 .toggle-knob { width: 22px; height: 22px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 .toggle-switch.on .toggle-knob { transform: translateX(20px); }
@@ -242,57 +247,57 @@ body, html {
     
     <div class="setting-row">
       <div class="setting-info">
-        <h3 id="st-scope">专业识别领域 (Domain Specialization)</h3>
-        <p id="st-scope-desc">启用垂直领域特征过滤，屏蔽非目标视觉干扰</p>
+        <h3 id="st-scope">专业识别领域</h3>
+        <p id="st-scope-desc">细分目标特化，屏蔽视觉杂波</p>
       </div>
       <select class="apple-select" id="sel-scope" onchange="updateScope(this.value)">
-        <option value="all">全域识别 (80+类)</option>
-        <option value="person">人物实体特化</option>
-        <option value="vehicle">交通与航空载具</option>
-        <option value="animal">自然界动物生态</option>
-        <option value="electronics">消费级电子设备</option>
-        <option value="furniture">室内家居环境</option>
-        <option value="food">餐饮与生鲜食物</option>
-        <option value="sports">运动器械与装备</option>
+        <option value="all">全域识别</option>
+        <option value="person">人物特化</option>
+        <option value="vehicle">交通载具</option>
+        <option value="animal">动物生态</option>
+        <option value="electronics">电子设备</option>
+        <option value="furniture">室内家居</option>
+        <option value="food">餐饮食物</option>
+        <option value="sports">运动器械</option>
       </select>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <h3 id="st-acc">高精度推理模式 (High Precision)</h3>
-        <p id="st-acc-desc">降低特征置信度阈值以捕获微小目标（将增加计算开销）</p>
+        <h3 id="st-acc">高精度推理模式</h3>
+        <p id="st-acc-desc">降低过滤阈值，捕获微小目标</p>
       </div>
       <div class="toggle-switch" id="tog-acc" onclick="toggleSetting('accuracy')"><div class="toggle-knob"></div></div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <h3 id="st-card">端云协同百科辅助 (Cloud-Edge Knowledge)</h3>
-        <p id="st-card-desc">点击识别目标，通过云端知识图谱检索详细释义与扩展信息</p>
+        <h3 id="st-card">端云协同百科</h3>
+        <p id="st-card-desc">点击目标，云端检索详细释义</p>
       </div>
       <div class="toggle-switch on" id="tog-card" onclick="toggleSetting('card')"><div class="toggle-knob"></div></div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <h3 id="st-night">暗光环境图像增强 (Low-Light Enhancement)</h3>
-        <p id="st-night-desc">动态提升像素对比度与感光度，优化极暗场景检测率</p>
+        <h3 id="st-night">暗光图像增强</h3>
+        <p id="st-night-desc">底层拉升感光度，优化暗光场景</p>
       </div>
       <div class="toggle-switch" id="tog-night" onclick="toggleSetting('night')"><div class="toggle-knob"></div></div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <h3 id="st-hud">全局目标统计仪表盘 (Analytics HUD)</h3>
-        <p id="st-hud-desc">实时聚合当前视野内的目标分类与数量分布</p>
+        <h3 id="st-hud">全息统计仪表盘</h3>
+        <p id="st-hud-desc">悬浮显示视野内目标分类与分布</p>
       </div>
       <div class="toggle-switch" id="tog-hud" onclick="toggleSetting('hud')"><div class="toggle-knob"></div></div>
     </div>
 
     <div class="setting-row">
       <div class="setting-info">
-        <h3 id="st-cam">摄像头传感器切换 (Camera Toggle)</h3>
-        <p id="st-cam-desc">切换设备的前置/后置图像采集传感器</p>
+        <h3 id="st-cam">前置 / 后置镜头</h3>
+        <p id="st-cam-desc">反转设备图像采集视角</p>
       </div>
       <div class="toggle-switch" id="tog-cam" onclick="toggleSetting('camera')"><div class="toggle-knob"></div></div>
     </div>
@@ -332,9 +337,16 @@ body, html {
 // Gemini API Key for Open Vocabulary Cloud Scan (Environment Injected)
 const apiKey = ""; 
 
-// 使用更强特征提取能力的 YOLOv8s (Small) 模型，带有向 v8n 的容错降级机制
-const YOLO_MODEL_URL_S = 'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@master/public/yolov8s_web_model/model.json';
-const YOLO_MODEL_URL_N = 'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json';
+// 使用多节点高可用 CDN 阵列，解决模型权重 404 无法加载的问题
+const YOLO_URLS_S = [
+  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@gh-pages/model/yolov8s_web_model/model.json',
+  'https://huggingface.co/salim4n/yolov8s_web_model/resolve/main/model.json'
+];
+const YOLO_URLS_N = [
+  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@gh-pages/model/yolov8n_web_model/model.json',
+  'https://huggingface.co/salim4n/yolov8n_web_model/resolve/main/model.json',
+  'https://cdn.jsdelivr.net/gh/HugoZeng/YOLOv8-TFJS@main/public/yolov8n_web_model/model.json'
+];
 
 const YOLO_CLASSES = [
   "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", 
@@ -385,7 +397,7 @@ const appSettings = {
   highAccuracy: false, 
   nightVision: false,
   showHud: false,
-  cloudCollab: true, // V10 端云协同开关
+  cloudCollab: true, 
   targetScope: 'all', 
   baseThreshold: 0.35
 };
@@ -703,7 +715,7 @@ async function getCameraStream() {
   return stream;
 }
 
-// --- 优雅的 YOLOv8 模型加载器 (带 S 版本自动降级) ---
+// --- 优雅的 YOLOv8 模型加载器 (多节点容错与自动降级) ---
 async function loadModel() {
   try {
     yoloModel = null; 
@@ -717,21 +729,32 @@ async function loadModel() {
         setStatus('statusLoading', 'loading', `<span class="progress-pct">${p}%</span>`);
     };
 
+    const loadWithFallback = async (urls) => {
+        for (let url of urls) {
+            try {
+                return await tf.loadGraphModel(url, { onProgress });
+            } catch (e) {
+                console.warn(`节点 ${url} 加载失败，切换下一个备用节点...`);
+            }
+        }
+        throw new Error("所有 CDN 节点均无法加载模型文件。");
+    };
+
     try {
-        // 尝试请求更强的 YOLOv8s 权重
-        yoloModel = await tf.loadGraphModel(YOLO_MODEL_URL_S, { onProgress });
+        const targetUrls = appSettings.highAccuracy ? YOLO_URLS_S : YOLO_URLS_N;
+        yoloModel = await loadWithFallback(targetUrls);
     } catch (e) {
-        console.warn("YOLOv8s 加载失败，自动触发柔性降级到 YOLOv8n...", e);
+        console.warn("YOLOv8 优先模型加载失败，自动触发柔性降级到极速版 YOLOv8n...", e);
         $('progress-bar').style.width = '0%';
         setStatus('statusLoading', 'loading', '<span class="progress-pct">降级加载中...</span>');
-        yoloModel = await tf.loadGraphModel(YOLO_MODEL_URL_N, { onProgress });
+        yoloModel = await loadWithFallback(YOLO_URLS_N);
     }
 
     $('progress-bar').style.width = '100%';
     setTimeout(() => {
       $('progress-container').style.opacity = '0';
       setStatus('statusReady', 'ready');
-      tf.tidy(() => { yoloModel.predict(tf.zeros([1, 640, 640, 3])); }); // 预热神经网络
+      tf.tidy(() => { yoloModel.predict(tf.zeros([1, 640, 640, 3])); }); 
     }, 400);
 
   } catch (e) { 
@@ -824,14 +847,12 @@ $('overlay').addEventListener('click', (e) => {
   const rect = e.target.getBoundingClientRect();
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
   
-  // 视觉触控反馈波纹
   const ripple = document.createElement('div');
   ripple.className = 'touch-ripple';
   ripple.style.left = `${x}px`; ripple.style.top = `${y}px`;
   $('overlay').parentNode.appendChild(ripple);
   setTimeout(() => ripple.remove(), 600);
 
-  // 1. 判定是否命中了已知的 YOLO Bounding Box
   let clickedBox = null;
   for(let i = clickableBoxes.length - 1; i >= 0; i--) {
     const box = clickableBoxes[i];
@@ -842,10 +863,8 @@ $('overlay').addEventListener('click', (e) => {
   }
 
   if (clickedBox) {
-    // 命中边缘层已知物体 -> 触发常规知识图谱 (Edge)
     triggerNetworkKnowledgeCard(clickedBox);
   } else {
-    // 命中空白区域 -> 触发未知目标云端视觉解析 (Cloud Open-Vocabulary)
     triggerCloudCollabScan(x, y);
   }
 });
@@ -857,7 +876,7 @@ async function triggerNetworkKnowledgeCard(boxData) {
   
   $('k-loading-area').style.display = 'flex';
   $('k-content-area').style.display = 'none';
-  $('k-loading-txt').textContent = "正在从云端知识图谱网络提取实体数据...";
+  $('k-loading-txt').textContent = "正在从开源知识图谱网络提取实体数据...";
 
   const zhName = LABELS_ZH[boxData.class] || boxData.class;
   $('k-badge').className = 'k-badge'; 
@@ -877,18 +896,23 @@ async function triggerNetworkKnowledgeCard(boxData) {
   $('k-link').href = `https://baike.baidu.com/item/${encodeURIComponent(zhName)}`;
 
   try {
-    const res = await fetch(`https://api.ownthink.com/bot?spoken=百科${encodeURIComponent(zhName)}`);
+    const res = await fetch(`https://zh.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(zhName)}`);
+    
+    if (!res.ok) throw new Error("网络图谱未收录该精确词条");
+    
     const data = await res.json();
-    let descText = "暂无匹配的结构化图谱数据支撑。";
-    if (data && data.message === 'success' && data.data && data.data.info && data.data.info.text) {
-        descText = data.data.info.text;
+    let descText = "";
+    
+    if (data && data.extract) {
+        descText = data.extract;
     }
-    if (descText.length < 20) {
-      descText = `边缘计算架构已将该目标拓扑判定为【${zhName}】。该类别隶属于深度学习公共目标集。可查阅相关文档以获取系统分类学定义。`;
+    
+    if (descText.length < 15) {
+      descText = `边缘计算架构已将该目标拓扑判定为【${zhName}】。该类别隶属于公共视觉识别集。受限于开源数据节点的摘要长度，请查阅底层文献以获取详细释义。`;
     }
     $('k-desc').textContent = descText;
   } catch (e) {
-    $('k-desc').textContent = "外部数据接口响应超时。请核验设备网络联通性或通过底部按钮直达检索文献。";
+    $('k-desc').textContent = `系统已捕捉到目标【${zhName}】的视觉特征，但开源图谱节点暂无此摘要。您可以点击下方按钮，直接在外部知识库中查阅该实体的详细定义。`;
   } finally {
     $('k-loading-area').style.display = 'none';
     $('k-content-area').style.display = 'block';
@@ -914,14 +938,12 @@ async function triggerCloudCollabScan(clickX, clickY) {
   const renderParams = getMediaRenderParams(sourceMedia, $('viewport'), currentMode === 'upload' ? 'contain' : 'cover');
   if(!renderParams) return;
 
-  // 将屏幕点击坐标反向映射到真实原图坐标
   let realX = (clickX - renderParams.offsetX) / renderParams.scale;
   let realY = (clickY - renderParams.offsetY) / renderParams.scale;
   if(appSettings.useFrontCam && currentMode !== 'upload') {
       realX = (renderParams.cw - clickX - renderParams.offsetX) / renderParams.scale;
   }
 
-  // 以点击点为核心，截取 400x400 的局部高解析度区域
   const cropSize = 400;
   let cx = Math.max(0, Math.min(realX - cropSize/2, mediaW - cropSize));
   let cy = Math.max(0, Math.min(realY - cropSize/2, mediaH - cropSize));
@@ -934,7 +956,7 @@ async function triggerCloudCollabScan(clickX, clickY) {
   cCtx.drawImage(sourceMedia, cx, cy, cw, ch, 0, 0, cw, ch);
   const base64Img = cropCanvas.toDataURL('image/jpeg', 0.8).split(',')[1];
   $('k-img').src = cropCanvas.toDataURL('image/jpeg');
-  $('k-link').style.display = 'none'; // 云端生成，隐藏静态百科链接
+  $('k-link').style.display = 'none'; 
 
   try {
     const promptText = `你是一个接入了边缘计算设备的高级视觉分析中枢。这张图像是由用户点击屏幕提取的局部环境特征图。由于该目标未被本地 YOLO 轻量级模型捕获，你需要执行多模态开集识别。
