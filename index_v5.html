@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>视觉检测 V5 Pro / Apple Style Object Detection</title>
+<!-- 引入 TensorFlow.js 核心及 COCO-SSD 模型 -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+<style>
+:root {
+  --app-bg: #000000;
+  --glass-bg: rgba(30, 30, 30, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --glass-blur: blur(24px) saturate(180%);
+  --text-main: #ffffff;
+  --text-sub: rgba(255, 255, 255, 0.6);
+  --accent: #FFD60A; /* Apple Yellow */
+  --live-red: #FF453A;
+  --apple-blue: #0A84FF;
+  --apple-green: #32D74B;
+  --max-ui-width: 500px; /* PC端限制宽度 */
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+body, html {
+  width: 100%; height: 100%;
+  background-color: var(--app-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+  color: var(--text-main);
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* 沉浸式取景器 */
+#viewport {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: #111; overflow: hidden;
+}
+
+#video, #static-img {
+  position: absolute; width: 100%; height: 100%;
+  z-index: 1; transition: opacity 0.3s ease;
+}
+#video { object-fit: cover; }
+#static-img { object-fit: contain; display: none; background: #000; }
+
+#overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 5; pointer-events: none;
+}
+
+/* UI 覆盖层 - 响应式居中 */
+#ui-layer {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: var(--max-ui-width); height: 100%;
+  z-index: 10; pointer-events: none;
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: env(safe-area-inset-top, 20px) env(safe-area-inset-right, 16px) 
+           env(safe-area-inset-bottom, 30px) env(safe-area-inset-left, 16px);
+}
+
+.interactive { pointer-events: auto; }
+
+/* 顶部状态栏 */
+#top-bar {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 10px;
+}
+.glass-pill {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  border: 0.5px solid var(--glass-border);
+  border-radius: 999px; padding: 8px 16px;
+  display: flex; align-items: center; gap: 8px;
+}
+.status-indicator {
+  width: 8px; height: 8px; border-radius: 50%; background: #555;
+  transition: background 0.3s; box-shadow: 0 0 8px rgba(0,0,0,0.5);
+}
+.status-indicator.loading { background: #FF9F0A; animation: pulse 1.5s infinite; }
+.status-indicator.ready { background: var(--apple-green); }
+.status-indicator.error { background: var(--live-red); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+#status-text { font-size: 13px; font-weight: 500; letter-spacing: 0.3px; }
+
+.top-btns { display: flex; gap: 10px; }
+.icon-btn {
+  background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  border: 0.5px solid var(--glass-border); color: white;
+  width: 38px; height: 38px; border-radius: 19px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: transform 0.2s, background 0.2s;
+  font-size: 13px; font-weight: 600;
+}
+@media(hover: hover) { .icon-btn:hover { background: rgba(255,255,255,0.2); } }
+.icon-btn:active { transform: scale(0.9); }
+
+/* 底部控制区 */
+#bottom-area {
+  display: flex; flex-direction: column; gap: 20px; padding-bottom: 20px;
+}
+
+/* 悬浮检测结果列表 */
+#results-scroller {
+  width: 100%; overflow-x: auto; overflow-y: hidden;
+  white-space: nowrap; padding: 0 10px;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+#results-scroller::-webkit-scrollbar { display: none; }
+#results-list {
+  display: inline-flex; gap: 10px; padding: 10px 0;
+  min-height: 50px; align-items: center; justify-content: center;
+  width: 100%; transition: all 0.3s;
+}
+.result-chip {
+  background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  border: 0.5px solid var(--glass-border);
+  padding: 8px 14px; border-radius: 20px;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 500; color: white;
+  animation: slideIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.chip-dot { width: 8px; height: 8px; border-radius: 4px; }
+.chip-conf { font-size: 11px; color: var(--text-sub); margin-left: 2px; }
+.no-result-text { font-size: 13px; color: var(--text-sub); font-weight: 500; }
+
+/* 模式拨盘 */
+#mode-dial {
+  display: flex; justify-content: center; gap: 24px;
+  font-size: 13px; font-weight: 600; color: var(--text-sub);
+  margin-bottom: 10px; transition: all 0.3s;
+}
+.mode-item { cursor: pointer; transition: color 0.3s; text-transform: uppercase; letter-spacing: 0.5px; }
+@media(hover: hover) { .mode-item:hover { color: rgba(255,255,255,0.8); } }
+.mode-item.active { color: var(--accent); }
+
+/* 快门主按钮 */
+#shutter-container { display: flex; justify-content: center; align-items: center; height: 80px; }
+#shutter-btn {
+  width: 72px; height: 72px; border-radius: 36px;
+  background: transparent; border: 4px solid white;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media(hover: hover) { #shutter-btn:hover { transform: scale(1.05); } }
+#shutter-btn:active { transform: scale(0.92); }
+#shutter-inner {
+  width: 54px; height: 54px; border-radius: 27px;
+  background: white; transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  display: flex; align-items: center; justify-content: center; color: black;
+}
+#shutter-btn.is-live-running #shutter-inner {
+  border-radius: 12px; width: 32px; height: 32px; background: var(--live-red); color: white;
+}
+#shutter-btn.is-live-running { border-color: rgba(255,255,255,0.5); }
+.icon-svg { width: 24px; height: 24px; opacity: 0; transition: opacity 0.3s; display: none; }
+#shutter-inner.show-upload #icon-upload { opacity: 1; display: block; }
+
+#file-input { display: none; }
+
+/* 二级菜单 - 设置面板 (Apple Modal Style) */
+#settings-modal {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.6); z-index: 50; display: flex;
+  align-items: flex-end; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.3s;
+}
+#settings-modal.show { opacity: 1; pointer-events: auto; }
+.modal-content {
+  width: 100%; max-width: var(--max-ui-width);
+  background: rgba(30, 30, 30, 0.75);
+  backdrop-filter: blur(40px) saturate(200%); -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border-radius: 24px 24px 0 0; padding: 24px;
+  transform: translateY(100%); transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  border-top: 0.5px solid var(--glass-border);
+}
+#settings-modal.show .modal-content { transform: translateY(0); }
+
+/* PC端Modal适配居中弹窗 */
+@media(min-width: 768px) {
+  #settings-modal { align-items: center; }
+  .modal-content { border-radius: 24px; border: 0.5px solid var(--glass-border); transform: scale(0.9); }
+  #settings-modal.show .modal-content { transform: scale(1); }
+}
+
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.modal-header h2 { font-size: 18px; font-weight: 600; margin: 0; }
+.btn-close {
+  width: 30px; height: 30px; border-radius: 15px; background: rgba(255,255,255,0.1);
+  border: none; color: white; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 14px;
+}
+
+.setting-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 0; border-bottom: 0.5px solid rgba(255,255,255,0.1);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-info h3 { font-size: 15px; font-weight: 500; margin: 0 0 4px 0; }
+.setting-info p { font-size: 12px; color: var(--text-sub); margin: 0; }
+
+/* iOS Style Toggle */
+.toggle-switch {
+  width: 46px; height: 26px; background: #39393d; border-radius: 13px;
+  position: relative; cursor: pointer; transition: background 0.3s;
+}
+.toggle-switch.on { background: var(--apple-green); }
+.toggle-knob {
+  width: 22px; height: 22px; background: white; border-radius: 50%;
+  position: absolute; top: 2px; left: 2px; transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+.toggle-switch.on .toggle-knob { transform: translateX(20px); }
+
+/* Range Slider */
+input[type=range] {
+  -webkit-appearance: none; width: 120px; background: transparent;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%;
+  background: #ffffff; cursor: pointer; margin-top: -8px; box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+input[type=range]::-webkit-slider-runnable-track {
+  width: 100%; height: 4px; cursor: pointer; background: rgba(255,255,255,0.2); border-radius: 2px;
+}
+.range-val { font-size: 13px; font-weight: 600; color: var(--accent); min-width: 36px; text-align: right; }
+</style>
+</head>
+<body>
+
+<div id="viewport">
+  <video id="video" autoplay muted playsinline></video>
+  <img id="static-img" alt="preview">
+  <canvas id="overlay"></canvas>
+</div>
+
+<div id="ui-layer">
+  <!-- Top Bar -->
+  <div id="top-bar" class="interactive">
+    <div class="glass-pill">
+      <div class="status-indicator loading" id="status-dot"></div>
+      <span id="status-text">系统启动中 / Booting...</span>
+    </div>
+    <div class="top-btns">
+      <button class="icon-btn" onclick="toggleLang()" id="btn-lang">EN</button>
+      <button class="icon-btn" onclick="openSettings()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Bottom Controls -->
+  <div id="bottom-area" class="interactive">
+    <!-- Results Array -->
+    <div id="results-scroller">
+      <div id="results-list"></div>
+    </div>
+
+    <!-- Mode Selector -->
+    <div id="mode-dial">
+      <div class="mode-item" id="mode-upload" onclick="setMode('upload')">图片照片</div>
+      <div class="mode-item active" id="mode-snap" onclick="setMode('snap')">单帧抓拍</div>
+      <div class="mode-item" id="mode-live" onclick="setMode('live')">实时追踪</div>
+    </div>
+
+    <!-- Shutter Button -->
+    <div id="shutter-container">
+      <button id="shutter-btn" onclick="onMainAction()">
+        <div id="shutter-inner">
+          <svg id="icon-upload" class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settings-modal" class="interactive">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="st-title">偏好设置 / Settings</h2>
+      <button class="btn-close" onclick="closeSettings()">✕</button>
+    </div>
+    
+    <div class="setting-row">
+      <div class="setting-info">
+        <h3 id="st-cam">前置/后置镜头</h3>
+        <p id="st-cam-desc">Switch Camera (Front/Back)</p>
+      </div>
+      <div class="toggle-switch" id="tog-cam" onclick="toggleSetting('camera')"><div class="toggle-knob"></div></div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <h3 id="st-acc">高精度模型模式</h3>
+        <p id="st-acc-desc">提升小物体识别率 (耗电增加)</p>
+      </div>
+      <div class="toggle-switch" id="tog-acc" onclick="toggleSetting('accuracy')"><div class="toggle-knob"></div></div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <h3 id="st-voice">AI 语音播报</h3>
+        <p id="st-voice-desc">自动读出检测到的物体名称</p>
+      </div>
+      <div class="toggle-switch" id="tog-voice" onclick="toggleSetting('voice')"><div class="toggle-knob"></div></div>
+    </div>
+
+    <div class="setting-row" style="border:none">
+      <div class="setting-info" style="flex:1">
+        <h3 id="st-thresh">置信度过滤阈值</h3>
+        <p id="st-thresh-desc">调低可发现更多物体，调高可减少误报</p>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input type="range" id="slider-thresh" min="0.1" max="0.9" step="0.05" value="0.4" oninput="updateThreshold(this.value)">
+        <div class="range-val" id="val-thresh">40%</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="image/*" onchange="handleFile(event)">
+
+<script>
+// --- 核心设定字典 ---
+const LABELS_ZH = {
+  person:'人',car:'汽车',truck:'货车',bus:'公交车',motorcycle:'摩托车',bicycle:'自行车',
+  dog:'狗',cat:'猫',bird:'鸟',horse:'马',cow:'牛',sheep:'羊',elephant:'大象',
+  bear:'熊',zebra:'斑马',giraffe:'长颈鹿',
+  chair:'椅子',couch:'沙发',bed:'床',toilet:'马桶',
+  'dining table':'餐桌',tv:'电视/屏幕',laptop:'笔记本电脑',mouse:'鼠标',keyboard:'键盘',
+  'cell phone':'手机',book:'书',bottle:'水瓶',cup:'杯子',
+  'sports ball':'球',backpack:'背包',umbrella:'雨伞',handbag:'手提包',
+  suitcase:'行李箱','traffic light':'红绿灯','stop sign':'停止标志',
+  airplane:'飞机',boat:'船',clock:'时钟',vase:'花瓶',scissors:'剪刀',
+  'potted plant':'盆栽',banana:'香蕉',apple:'苹果',pizza:'披萨',
+  'hot dog':'热狗',cake:'蛋糕',sandwich:'三明治',donut:'甜甜圈',
+  fork:'叉子',knife:'刀',spoon:'勺子',bowl:'碗',
+  refrigerator:'冰箱',microwave:'微波炉',oven:'烤箱',toaster:'烤面包机',
+  'wine glass':'高脚杯',fire_hydrant:'消防栓',bench:'长椅',kite:'风筝',
+  tie:'领带',skateboard:'滑板',surfboard:'冲浪板',tennis_racket:'网球拍',baseball_bat:'棒球棒'
+};
+
+const PALETTE = ['#FFD60A', '#32D74B', '#0A84FF', '#FF9F0A', '#FF375F', '#BF5AF2', '#5E5CE6', '#FFD60A'];
+
+// --- 全局状态 ---
+let model = null;
+let isZH = true;
+let currentMode = 'snap'; 
+let liveStream = null;
+let liveRunning = false;
+let trackerData = []; 
+let lastSpokenTime = 0;
+let lastSpokenText = "";
+
+// 设置状态
+const appSettings = {
+  useFrontCam: false,       // false=环境(后置), true=用户(前置)
+  highAccuracy: false,      // false=lite_mobilenet_v2, true=mobilenet_v2
+  voiceActive: false,       // TTS
+  threshold: 0.40           // 基准置信度
+};
+
+const $ = id => document.getElementById(id);
+
+// --- 多语言支持 ---
+const L = {
+  statusLoading:  {zh:'初始化 AI 引擎…',   en:'Init AI Engine…'},
+  statusReady:    {zh:'就绪',             en:'Ready'},
+  statusError:    {zh:'模型加载失败',      en:'Model Error'},
+  statusDetecting:{zh:'深度分析中…',       en:'Analyzing…'},
+  statusDone:     {zh:'分析完成',         en:'Done'},
+  statusLive:     {zh:'实时追踪中',       en:'Tracking Live'},
+  noResult:       {zh:'未检测到符合阈值的目标', en:'No confident objects detected'},
+  modeUpload:     {zh:'图片照片',         en:'PHOTO'},
+  modeSnap:       {zh:'单帧抓拍',         en:'CAPTURE'},
+  modeLive:       {zh:'实时追踪',         en:'LIVE TRACK'},
+};
+
+function t(key) { return L[key]?.[isZH?'zh':'en'] || key; }
+
+function toggleLang() {
+  isZH = !isZH;
+  $('btn-lang').textContent = isZH ? 'EN' : '中';
+  $('mode-upload').textContent = t('modeUpload');
+  $('mode-snap').textContent = t('modeSnap');
+  $('mode-live').textContent = t('modeLive');
+  
+  // 设置面板语言翻译
+  $('st-title').textContent = isZH ? '偏好设置' : 'Preferences';
+  $('st-cam').textContent = isZH ? '前置/后置镜头' : 'Front/Back Camera';
+  $('st-cam-desc').textContent = isZH ? '切换设备方向' : 'Switch device camera direction';
+  $('st-acc').textContent = isZH ? '高精度模型模式' : 'High Accuracy Model';
+  $('st-acc-desc').textContent = isZH ? '提升小物体识别率 (耗电增加)' : 'Better small object detection (more power usage)';
+  $('st-voice').textContent = isZH ? 'AI 语音播报' : 'AI Voice Announce';
+  $('st-voice-desc').textContent = isZH ? '自动读出检测到的物体名称' : 'Read out detected objects via TTS';
+  $('st-thresh').textContent = isZH ? '置信度过滤阈值' : 'Confidence Threshold';
+  $('st-thresh-desc').textContent = isZH ? '调低可发现更多物体，调高可减少误报' : 'Lower to find more, raise to reduce false positives';
+
+  if ($('status-dot').className.includes('ready')) setStatus('statusReady', 'ready');
+}
+
+function setStatus(key, dot = 'ready') {
+  $('status-text').textContent = t(key);
+  $('status-dot').className = 'status-indicator ' + dot;
+}
+
+// --- 设置逻辑 ---
+function openSettings() { $('settings-modal').classList.add('show'); }
+function closeSettings() { $('settings-modal').classList.remove('show'); }
+
+async function toggleSetting(type) {
+  if (type === 'camera') {
+    appSettings.useFrontCam = !appSettings.useFrontCam;
+    $('tog-cam').classList.toggle('on', appSettings.useFrontCam);
+    // 如果正在相机模式，重启流
+    if (liveRunning) { stopLive(); toggleLive(); }
+  } else if (type === 'accuracy') {
+    appSettings.highAccuracy = !appSettings.highAccuracy;
+    $('tog-acc').classList.toggle('on', appSettings.highAccuracy);
+    // 重载模型
+    setStatus('statusLoading', 'loading');
+    await loadModel(); 
+  } else if (type === 'voice') {
+    appSettings.voiceActive = !appSettings.voiceActive;
+    $('tog-voice').classList.toggle('on', appSettings.voiceActive);
+    if(appSettings.voiceActive) speakTTS(isZH ? "语音播报已开启" : "Voice enabled");
+  }
+}
+
+function updateThreshold(val) {
+  appSettings.threshold = parseFloat(val);
+  $('val-thresh').textContent = Math.round(val * 100) + '%';
+  // 如果有图，立刻重绘
+  if(!liveRunning && currentMode === 'upload' && trackerData.length > 0) {
+      // 这里的处理稍显复杂，简单起见提示用户重新触发
+  }
+}
+
+// --- 语音 TTS ---
+function speakTTS(text) {
+  if (!window.speechSynthesis) return;
+  const msg = new SpeechSynthesisUtterance(text);
+  msg.lang = isZH ? 'zh-CN' : 'en-US';
+  msg.rate = 1.1; // 稍微读快点
+  window.speechSynthesis.speak(msg);
+}
+
+function handleVoiceAnnounce(preds) {
+  if (!appSettings.voiceActive || preds.length === 0) return;
+  const now = Date.now();
+  // 限制播报频率：每 3 秒最多说一次，且内容要有变化
+  if (now - lastSpokenTime < 3000) return; 
+  
+  // 取置信度最高的前2个物品
+  const names = preds.slice(0, 2).map(p => isZH ? (LABELS_ZH[p.class]||p.class) : p.class);
+  const textToSpeak = Array.from(new Set(names)).join(isZH ? ' 和 ' : ' and '); // 去重
+  
+  if (textToSpeak !== lastSpokenText) {
+    speakTTS(textToSpeak);
+    lastSpokenText = textToSpeak;
+    lastSpokenTime = now;
+  }
+}
+
+// --- UI 模式切换 ---
+function setMode(mode) {
+  if (currentMode === 'live' && liveRunning && mode !== 'live') stopLive(); 
+  currentMode = mode;
+  ['upload', 'snap', 'live'].forEach(m => { $(`mode-${m}`).className = `mode-item ${m === mode ? 'active' : ''}`; });
+  const inner = $('shutter-inner'), btn = $('shutter-btn');
+  btn.classList.remove('is-live-running');
+  if (mode === 'upload') { inner.className = 'show-upload'; inner.style.background = 'white'; } 
+  else if (mode === 'snap') { inner.className = ''; inner.style.background = 'white'; } 
+  else if (mode === 'live') {
+    inner.className = ''; inner.style.background = liveRunning ? 'var(--live-red)' : 'white';
+    if(liveRunning) btn.classList.add('is-live-running');
+  }
+}
+
+function onMainAction() {
+  if (!model) return;
+  if (currentMode === 'upload') $('file-input').click();
+  else if (currentMode === 'snap') captureMode();
+  else if (currentMode === 'live') toggleLive();
+}
+
+// --- 模型初始化与算法 ---
+async function loadModel() {
+  try {
+    model = null; // 清理旧模型
+    // COCO-SSD 支持 lite_mobilenet_v2, mobilenet_v1, mobilenet_v2
+    const baseModel = appSettings.highAccuracy ? 'mobilenet_v2' : 'lite_mobilenet_v2';
+    model = await cocoSsd.load({ base: baseModel });
+    setStatus('statusReady', 'ready');
+  } catch (e) {
+    setStatus('statusError', 'error');
+  }
+}
+
+function calculateIoU(box1, box2) {
+  const [x1, y1, w1, h1] = box1; const [x2, y2, w2, h2] = box2;
+  const xA = Math.max(x1, x2), yA = Math.max(y1, y2);
+  const xB = Math.min(x1 + w1, x2 + w2), yB = Math.min(y1 + h1, y2 + h2);
+  const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+  const unionArea = (w1 * h1) + (w2 * h2) - interArea;
+  return interArea / unionArea;
+}
+
+function applyNMS(predictions, iouThreshold = 0.45) {
+  const sorted = [...predictions].sort((a, b) => b.score - a.score);
+  const selected = [];
+  for (const p of sorted) {
+    let isDuplicate = false;
+    for (const s of selected) {
+      if (p.class === s.class && calculateIoU(p.bbox, s.bbox) > iouThreshold) {
+        isDuplicate = true; break;
+      }
+    }
+    if (!isDuplicate) selected.push(p);
+  }
+  return selected;
+}
+
+function processPredictions(rawPreds) {
+  // 基于用户设置的基准阈值过滤，对容易误报的特殊类别(电视/电脑)自动上调门槛(+0.15)
+  const filtered = rawPreds.filter(p => {
+    let thresh = appSettings.threshold;
+    if(p.class === 'tv' || p.class === 'laptop') thresh = Math.min(thresh + 0.15, 0.85); 
+    return p.score >= thresh;
+  });
+  const finalPreds = applyNMS(filtered, 0.45);
+  handleVoiceAnnounce(finalPreds); // 触发语音
+  return finalPreds;
+}
+
+function updateTracker(newPreds) {
+  const TRACK_IOU_THRESH = 0.3, SMOOTH = 0.4, MAX_MISSING = 2;
+  const matchedIndices = new Set(), nextTracker = [];
+  for (const track of trackerData) {
+    let bestMatch = null, bestIoU = 0, bestIdx = -1;
+    for (let i = 0; i < newPreds.length; i++) {
+      if (matchedIndices.has(i)) continue;
+      const pred = newPreds[i];
+      if (pred.class !== track.class) continue;
+      const iou = calculateIoU(track.bbox, pred.bbox);
+      if (iou > bestIoU && iou > TRACK_IOU_THRESH) { bestIoU = iou; bestMatch = pred; bestIdx = i; }
+    }
+    if (bestMatch) {
+      matchedIndices.add(bestIdx);
+      const [tx, ty, tw, th] = track.bbox; const [nx, ny, nw, nh] = bestMatch.bbox;
+      track.bbox = [ tx + (nx - tx) * SMOOTH, ty + (ny - ty) * SMOOTH, tw + (nw - tw) * SMOOTH, th + (nh - th) * SMOOTH ];
+      track.score = track.score * 0.5 + bestMatch.score * 0.5;
+      track.missingFrames = 0;
+      nextTracker.push(track);
+    } else {
+      track.missingFrames = (track.missingFrames || 0) + 1;
+      if (track.missingFrames <= MAX_MISSING) nextTracker.push(track);
+    }
+  }
+  for (let i = 0; i < newPreds.length; i++) {
+    if (!matchedIndices.has(i)) nextTracker.push({ ...newPreds[i], missingFrames: 0 });
+  }
+  trackerData = nextTracker;
+  return trackerData;
+}
+
+// --- 动态渲染坐标系 (PC端Resize适配) ---
+function syncCanvasSize() {
+  const vp = $('viewport'); const ov = $('overlay');
+  if (ov.width !== vp.clientWidth || ov.height !== vp.clientHeight) {
+    ov.width = vp.clientWidth; ov.height = vp.clientHeight;
+  }
+}
+
+// 监听浏览器窗口变化，自动重绘画布（解决PC端拖拉窗口框错位）
+window.addEventListener('resize', () => {
+  syncCanvasSize();
+  if (!liveRunning && trackerData.length > 0) {
+    const mediaEl = currentMode === 'upload' ? $('static-img') : $('video');
+    const mode = currentMode === 'upload' ? 'contain' : 'cover';
+    const params = getMediaRenderParams(mediaEl, $('viewport'), mode);
+    drawBoxes($('overlay').getContext('2d'), trackerData, params);
+  }
+});
+
+function getMediaRenderParams(mediaEl, containerEl, fitMode = 'cover') {
+  let mw = mediaEl.videoWidth || mediaEl.naturalWidth;
+  let mh = mediaEl.videoHeight || mediaEl.naturalHeight;
+  if (!mw || !mh) return null;
+  const cw = containerEl.clientWidth; const ch = containerEl.clientHeight;
+  const scaleX = cw / mw; const scaleY = ch / mh;
+  // 核心苹果映射逻辑: 视频 cover 裁剪，图片 contain 留黑边
+  const scale = fitMode === 'cover' ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+  const renderW = mw * scale; const renderH = mh * scale;
+  const offsetX = (cw - renderW) / 2; const offsetY = (ch - renderH) / 2;
+  return { scale, offsetX, offsetY, cw, ch };
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+
+function drawBoxes(ctx, preds, renderParams) {
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  if (!renderParams) return;
+  const { scale, offsetX, offsetY } = renderParams;
+
+  preds.forEach((p) => {
+    if (p.missingFrames > 0) ctx.globalAlpha = 0.4; else ctx.globalAlpha = 1;
+
+    // 前置摄像头镜像翻转补偿
+    let x = p.bbox[0] * scale + offsetX;
+    const y = p.bbox[1] * scale + offsetY;
+    const w = p.bbox[2] * scale;
+    const h = p.bbox[3] * scale;
+    
+    // 如果是前置镜头(被CSS镜像了)，画框坐标需反转
+    if(appSettings.useFrontCam && currentMode !== 'upload') {
+        x = renderParams.cw - x - w;
+    }
+    
+    const colorIdx = p.class.split('').reduce((a,b)=>a+b.charCodeAt(0),0) % PALETTE.length;
+    const color = PALETTE[colorIdx];
+
+    // Bounding Box
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 8;
+    roundRect(ctx, x, y, w, h, 8); 
+    ctx.stroke();
+    ctx.shadowBlur = 0; 
+
+    const zh  = LABELS_ZH[p.class] || p.class;
+    const lbl = isZH ? zh : p.class;
+    const conf = Math.round(p.score * 100);
+    const txt  = `${lbl} ${conf}%`;
+    
+    ctx.font = '600 12px "SF Pro Text", system-ui, sans-serif';
+    const tw = ctx.measureText(txt).width;
+    const ph = 24, pw = tw + 20, pr = 12;
+    const px = x + (w/2) - (pw/2); 
+    const py = y - ph - 8 < 0 ? y + 8 : y - ph - 8;
+
+    // Pill Background
+    ctx.save();
+    roundRect(ctx, px, py, pw, ph, pr);
+    ctx.fillStyle = 'rgba(30,30,30,0.75)'; 
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(px + 10, py + ph/2, 4, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    ctx.fillStyle = '#fff';
+    ctx.fillText(txt, px + 20, py + 16);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function renderResultsPanel(preds) {
+  const list = $('results-list');
+  list.innerHTML = '';
+  const validPreds = preds.filter(p => !p.missingFrames);
+  
+  if (!validPreds.length) {
+    list.innerHTML = `<div class="no-result-text">${t('noResult')}</div>`;
+    return;
+  }
+  
+  validPreds.forEach((p) => {
+    const colorIdx = p.class.split('').reduce((a,b)=>a+b.charCodeAt(0),0) % PALETTE.length;
+    const color = PALETTE[colorIdx];
+    const zh    = LABELS_ZH[p.class] || p.class;
+    const conf  = Math.round(p.score * 100);
+    
+    const div = document.createElement('div');
+    div.className = 'result-chip';
+    div.innerHTML = `
+      <div class="chip-dot" style="background:${color}"></div>
+      <span>${isZH ? zh : p.class}</span>
+      <span class="chip-conf">${conf}%</span>`;
+    list.appendChild(div);
+  });
+}
+
+function clearCanvasAndResults() {
+  const ov = $('overlay');
+  if (ov && ov.getContext) ov.getContext('2d').clearRect(0, 0, ov.width, ov.height);
+  $('results-list').innerHTML = '';
+  trackerData = [];
+}
+
+// --- 请求摄像头 (申请高分辨率) ---
+async function getCameraStream() {
+  // 向硬件请求最高的 1080P/4K 画质以提升小物体识别率
+  const constraints = {
+    video: {
+      facingMode: appSettings.useFrontCam ? 'user' : 'environment',
+      width: { ideal: 1920 },
+      height: { ideal: 1080 }
+    }
+  };
+  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  
+  // 处理前置摄像头的镜像视觉问题
+  $('video').style.transform = appSettings.useFrontCam ? 'scaleX(-1)' : 'scaleX(1)';
+  return stream;
+}
+
+// --- 动作执行 ---
+async function handleFile(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const img = new Image();
+  img.onload = async () => {
+    const vp = $('viewport'), video = $('video'), imgEl = $('static-img');
+    video.style.display = 'none';
+    imgEl.src = img.src; imgEl.style.display = 'block';
+    
+    setStatus('statusDetecting', 'loading');
+    clearCanvasAndResults();
+    
+    setTimeout(async () => {
+      const raw = await model.detect(img);
+      const cleanPreds = processPredictions(raw);
+      trackerData = cleanPreds; // 存入以备 Resize 重绘
+      syncCanvasSize();
+      const renderParams = getMediaRenderParams(imgEl, vp, 'contain');
+      drawBoxes($('overlay').getContext('2d'), cleanPreds, renderParams);
+      
+      setStatus('statusDone', 'ready');
+      renderResultsPanel(cleanPreds);
+    }, 100);
+  };
+  img.src = URL.createObjectURL(file);
+  e.target.value = '';
+}
+
+async function captureMode() {
+  try {
+    const stream = await getCameraStream();
+    const video = $('video'), imgEl = $('static-img'), vp = $('viewport');
+    imgEl.style.display = 'none'; video.style.display = 'block';
+    video.srcObject = stream;
+    await video.play();
+    
+    setStatus('statusDetecting', 'loading');
+    clearCanvasAndResults();
+    
+    vp.style.background = '#fff'; video.style.opacity = '0.5';
+    setTimeout(()=> { vp.style.background = '#111'; video.style.opacity = '1'; }, 150);
+
+    setTimeout(async () => {
+      const raw = await model.detect(video);
+      const cleanPreds = processPredictions(raw);
+      trackerData = cleanPreds;
+      
+      syncCanvasSize();
+      const renderParams = getMediaRenderParams(video, vp, 'cover');
+      drawBoxes($('overlay').getContext('2d'), cleanPreds, renderParams);
+      
+      stream.getTracks().forEach(t => t.stop()); 
+      video.srcObject = null;
+      setStatus('statusDone', 'ready');
+      renderResultsPanel(cleanPreds);
+    }, 1000); // 等摄像头对焦
+  } catch (err) { setStatus('statusError', 'error'); }
+}
+
+let frameCount = 0;
+async function toggleLive() {
+  if (liveRunning) { stopLive(); return; }
+  try {
+    liveStream = await getCameraStream();
+    const video = $('video'), imgEl = $('static-img'), vp = $('viewport');
+    imgEl.style.display = 'none'; video.style.display = 'block';
+    video.srcObject = liveStream;
+    await video.play();
+    
+    liveRunning = true;
+    trackerData = [];
+    frameCount = 0;
+    
+    $('shutter-btn').classList.add('is-live-running');
+    $('shutter-inner').style.background = 'var(--live-red)';
+    setStatus('statusLive', 'ready');
+    clearCanvasAndResults();
+    
+    const ctx = $('overlay').getContext('2d');
+    async function detectLoop() {
+      if (!liveRunning) return;
+      if (video.readyState === 4) {
+        syncCanvasSize();
+        const renderParams = getMediaRenderParams(video, vp, 'cover');
+
+        if (frameCount % 3 === 0) { // 稍微降低频率平衡高分辨率的发热
+          const raw = await model.detect(video);
+          const cleanPreds = processPredictions(raw);
+          trackerData = updateTracker(cleanPreds);
+          renderResultsPanel(trackerData);
+        }
+        drawBoxes(ctx, trackerData, renderParams);
+        frameCount++;
+      }
+      if (liveRunning) requestAnimationFrame(detectLoop);
+    }
+    detectLoop();
+  } catch (err) { setStatus('statusError', 'error'); }
+}
+
+function stopLive() {
+  liveRunning = false;
+  trackerData = [];
+  if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; }
+  
+  $('shutter-btn').classList.remove('is-live-running');
+  $('shutter-inner').style.background = 'white';
+  
+  clearCanvasAndResults();
+  if ($('status-dot').className.includes('ready')) setStatus('statusReady', 'ready');
+}
+
+// 初始化启动
+loadModel();
+</script>
+</body>
+</html>
