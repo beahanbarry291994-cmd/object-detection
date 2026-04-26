@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>视觉检测 V11 · YOLOv8s</title>
+<script src="https://unpkg.com/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<style>
+:root {
+  --app-bg:#000; --glass-bg:rgba(30,30,30,0.45); --glass-border:rgba(255,255,255,0.15);
+  --glass-blur:blur(28px) saturate(200%); --text-main:#fff; --text-sub:rgba(255,255,255,0.6);
+  --accent:#FFD60A; --live-red:#FF453A; --apple-blue:#0A84FF;
+  --apple-green:#32D74B; --apple-purple:#BF5AF2; --max-ui-width:500px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body,html{width:100%;height:100%;background:var(--app-bg);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;color:var(--text-main);overflow:hidden;overscroll-behavior:none}
+
+#viewport{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#111;overflow:hidden}
+#video,#static-img{position:absolute;width:100%;height:100%;z-index:1;transition:filter 0.3s}
+#video{object-fit:cover}
+#static-img{object-fit:contain;display:none;background:#000}
+.night-vision-on{filter:brightness(1.3) contrast(1.1) saturate(1.2)}
+#overlay{position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:auto}
+
+#progress-container{position:absolute;top:0;left:0;width:100%;height:3px;background:rgba(255,255,255,0.1);z-index:100;opacity:0;transition:opacity 0.3s}
+#progress-bar{width:0%;height:100%;background:var(--apple-blue);box-shadow:0 0 10px var(--apple-blue);transition:width 0.2s ease-out}
+
+#ui-layer{position:absolute;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:var(--max-ui-width);height:100%;z-index:10;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:env(safe-area-inset-top,20px) env(safe-area-inset-right,16px) env(safe-area-inset-bottom,30px) env(safe-area-inset-left,16px)}
+.interactive{pointer-events:auto}
+
+#top-bar{display:flex;justify-content:space-between;align-items:flex-start;padding:10px;margin-top:5px}
+.glass-pill{background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:0.5px solid var(--glass-border);border-radius:999px;padding:8px 16px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+.status-indicator{width:8px;height:8px;border-radius:50%;background:#555;transition:background 0.3s}
+.status-indicator.loading{background:#FF9F0A;animation:pulse 1.5s infinite}
+.status-indicator.ready{background:var(--apple-green)}
+.status-indicator.error{background:var(--live-red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+#status-text{font-size:13px;font-weight:500;letter-spacing:0.3px;display:flex;gap:4px}
+.progress-pct{color:var(--apple-blue);font-weight:700}
+
+.top-btns{display:flex;gap:10px}
+.icon-btn{background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:0.5px solid var(--glass-border);color:#fff;width:38px;height:38px;border-radius:19px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);transition:transform 0.2s cubic-bezier(0.2,0.8,0.2,1)}
+.icon-btn:active{transform:scale(0.85)}
+
+#analytics-hud{position:absolute;top:70px;left:26px;z-index:10;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:0.5px solid var(--glass-border);border-radius:14px;padding:12px;min-width:120px;display:none;flex-direction:column;gap:6px;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,0.3)}
+#analytics-hud.show{display:flex}
+.hud-title{font-size:10px;color:var(--text-sub);text-transform:uppercase;font-weight:600;margin-bottom:4px;letter-spacing:0.5px}
+.hud-row{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:500}
+.hud-dot-wrap{display:flex;align-items:center;gap:6px}
+.hud-dot{width:8px;height:8px;border-radius:4px}
+.hud-count{font-weight:700;font-variant-numeric:tabular-nums}
+
+#bottom-area{display:flex;flex-direction:column;gap:20px;padding-bottom:20px}
+#mode-dial{display:flex;justify-content:center;gap:24px;font-size:13px;font-weight:600;color:var(--text-sub);margin-bottom:10px}
+.mode-item{cursor:pointer;transition:color 0.3s;text-transform:uppercase;letter-spacing:0.5px}
+.mode-item.active{color:var(--accent)}
+
+#shutter-container{display:flex;justify-content:center;align-items:center;height:80px}
+#shutter-btn{width:72px;height:72px;border-radius:36px;background:transparent;border:4px solid white;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s cubic-bezier(0.2,0.8,0.2,1)}
+#shutter-btn:active{transform:scale(0.92)}
+#shutter-inner{width:54px;height:54px;border-radius:27px;background:white;transition:all 0.3s cubic-bezier(0.2,0.8,0.2,1);display:flex;align-items:center;justify-content:center;color:black}
+#shutter-btn.is-live-running #shutter-inner{border-radius:12px;width:32px;height:32px;background:var(--live-red)}
+#shutter-btn.is-live-running{border-color:rgba(255,255,255,0.5)}
+.icon-svg{width:24px;height:24px;opacity:0;display:none}
+#shutter-inner.show-upload #icon-upload{opacity:1;display:block}
+
+.modal-overlay{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:50;display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.3s cubic-bezier(0.25,1,0.5,1)}
+.modal-overlay.show{opacity:1;pointer-events:auto}
+#settings-modal .modal-content{width:100%;max-width:var(--max-ui-width);background:rgba(30,30,30,0.85);backdrop-filter:blur(40px) saturate(200%);-webkit-backdrop-filter:blur(40px) saturate(200%);border-radius:24px 24px 0 0;padding:24px;transform:translateY(100%);transition:transform 0.4s cubic-bezier(0.175,0.885,0.32,1.1);border-top:0.5px solid var(--glass-border);max-height:85vh;overflow-y:auto}
+#settings-modal.show .modal-content{transform:translateY(0)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;position:sticky;top:0;z-index:2}
+.modal-header h2{font-size:18px;font-weight:600;margin:0;letter-spacing:0.5px}
+.btn-close{width:30px;height:30px;border-radius:15px;background:rgba(255,255,255,0.1);border:none;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px}
+.setting-row{display:flex;justify-content:space-between;align-items:center;padding:16px 0;border-bottom:0.5px solid rgba(255,255,255,0.1)}
+.setting-row:last-child{border-bottom:none}
+.setting-info{flex:1;padding-right:16px}
+.setting-info h3{font-size:15px;font-weight:500;margin:0 0 6px 0;letter-spacing:0.5px}
+.setting-info p{font-size:12px;color:var(--text-sub);margin:0;line-height:1.4}
+.apple-select{flex-shrink:0;background:rgba(255,255,255,0.1);color:#fff;border:none;padding:8px 12px;border-radius:10px;font-size:13px;font-weight:500;outline:none;appearance:none;text-align:right;cursor:pointer;max-width:140px}
+.apple-select option{background:#222;color:#fff}
+.toggle-switch{flex-shrink:0;width:46px;height:26px;background:#39393d;border-radius:13px;position:relative;cursor:pointer;transition:background 0.3s}
+.toggle-switch.on{background:var(--apple-green)}
+.toggle-knob{width:22px;height:22px;background:#fff;border-radius:50%;position:absolute;top:2px;left:2px;transition:transform 0.3s cubic-bezier(0.2,0.8,0.2,1);box-shadow:0 2px 4px rgba(0,0,0,0.2)}
+.toggle-switch.on .toggle-knob{transform:translateX(20px)}
+
+#knowledge-sheet{z-index:60;align-items:center}
+#knowledge-sheet .modal-content{width:calc(100% - 32px);max-width:400px;background:rgba(25,25,25,0.85);backdrop-filter:blur(50px) saturate(200%);-webkit-backdrop-filter:blur(50px) saturate(200%);border-radius:28px;padding:20px;transform:scale(0.9) translateY(10px);opacity:0;transition:all 0.35s cubic-bezier(0.175,0.885,0.32,1.1);border:1px solid var(--glass-border);box-shadow:0 20px 40px rgba(0,0,0,0.5);margin-bottom:0}
+#knowledge-sheet.show .modal-content{transform:scale(1) translateY(0);opacity:1}
+.knowledge-img-wrap{width:100%;height:160px;border-radius:16px;overflow:hidden;margin-bottom:16px;background:#000;position:relative}
+.knowledge-img-wrap img{width:100%;height:100%;object-fit:cover;opacity:0.9}
+.k-badge{position:absolute;top:12px;left:12px;background:rgba(0,0,0,0.6);backdrop-filter:blur(10px);padding:6px 12px;border-radius:12px;font-size:11px;font-weight:600;display:flex;align-items:center;gap:4px}
+.k-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--apple-green);box-shadow:0 0 6px var(--apple-green)}
+.k-badge.cloud-mode::before{background:var(--apple-purple);box-shadow:0 0 6px var(--apple-purple)}
+.k-title{font-size:22px;font-weight:700;margin:0 0 6px 0;color:#fff}
+.k-sub{font-size:13px;color:var(--accent);font-weight:600;margin:0 0 12px 0;text-transform:uppercase;letter-spacing:0.5px}
+.k-desc{font-size:14px;color:rgba(255,255,255,0.85);line-height:1.6;max-height:160px;overflow-y:auto}
+.k-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:50px 0;gap:16px;color:var(--text-sub);font-size:14px}
+.spinner{width:28px;height:28px;border:3px solid rgba(255,255,255,0.1);border-top-color:var(--apple-blue);border-radius:50%;animation:spin 1s linear infinite}
+.btn-external{display:block;width:100%;padding:12px;background:rgba(255,255,255,0.1);border-radius:12px;text-align:center;color:#fff;text-decoration:none;font-size:14px;font-weight:600;margin-top:16px;transition:background 0.2s}
+.btn-external:active{background:rgba(255,255,255,0.2)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.touch-ripple{position:absolute;width:40px;height:40px;background:rgba(255,255,255,0.5);border-radius:50%;transform:translate(-50%,-50%) scale(0);opacity:1;pointer-events:none;animation:rippleAnim 0.6s ease-out forwards;z-index:20}
+@keyframes rippleAnim{to{transform:translate(-50%,-50%) scale(2.5);opacity:0}}
+</style>
+</head>
+<body>
+
+<div id="progress-container"><div id="progress-bar"></div></div>
+<div id="viewport">
+  <video id="video" autoplay muted playsinline></video>
+  <img id="static-img" alt="preview">
+  <canvas id="overlay"></canvas>
+</div>
+<div id="analytics-hud">
+  <div class="hud-title" id="hud-title">全局分类统计</div>
+  <div id="hud-content"></div>
+</div>
+
+<div id="ui-layer">
+  <div id="top-bar" class="interactive">
+    <div class="glass-pill">
+      <div class="status-indicator loading" id="status-dot"></div>
+      <div id="status-text">加载 YOLOv8s 模型...</div>
+    </div>
+    <div class="top-btns">
+      <button class="icon-btn" onclick="toggleLang()" id="btn-lang">EN</button>
+      <button class="icon-btn" onclick="openSettings()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </div>
+  <div id="bottom-area" class="interactive">
+    <div id="mode-dial">
+      <div class="mode-item" id="mode-upload" onclick="setMode('upload')">静态解析</div>
+      <div class="mode-item active" id="mode-snap" onclick="setMode('snap')">单帧捕获</div>
+      <div class="mode-item" id="mode-live" onclick="setMode('live')">实时计算</div>
+    </div>
+    <div id="shutter-container">
+      <button id="shutter-btn" onclick="onMainAction()">
+        <div id="shutter-inner">
+          <svg id="icon-upload" class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings -->
+<div id="settings-modal" class="modal-overlay interactive">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>模型与偏好设置</h2>
+      <button class="btn-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>专业识别领域</h3><p>细分目标特化，屏蔽视觉杂波</p></div>
+      <select class="apple-select" id="sel-scope" onchange="updateScope(this.value)">
+        <option value="all">全域识别</option>
+        <option value="person">人物特化</option>
+        <option value="vehicle">交通载具</option>
+        <option value="animal">动物生态</option>
+        <option value="electronics">电子设备</option>
+        <option value="furniture">室内家居</option>
+        <option value="food">餐饮食物</option>
+        <option value="sports">运动器械</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>高精度推理模式</h3><p>降低过滤阈值，捕获微小目标</p></div>
+      <div class="toggle-switch" id="tog-acc" onclick="toggleSetting('accuracy')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>端云协同百科</h3><p>点击目标，检索详细释义</p></div>
+      <div class="toggle-switch on" id="tog-card" onclick="toggleSetting('card')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>暗光图像增强</h3><p>底层拉升感光度，优化暗光场景</p></div>
+      <div class="toggle-switch" id="tog-night" onclick="toggleSetting('night')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>全息统计仪表盘</h3><p>悬浮显示视野内目标分类与分布</p></div>
+      <div class="toggle-switch" id="tog-hud" onclick="toggleSetting('hud')"><div class="toggle-knob"></div></div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><h3>前置 / 后置镜头</h3><p>反转设备图像采集视角</p></div>
+      <div class="toggle-switch" id="tog-cam" onclick="toggleSetting('camera')"><div class="toggle-knob"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Knowledge Card -->
+<div id="knowledge-sheet" class="modal-overlay interactive">
+  <div class="modal-content">
+    <div class="modal-header" style="margin-bottom:16px">
+      <h2>实体特征图谱</h2>
+      <button class="btn-close" onclick="$('knowledge-sheet').classList.remove('show')">✕</button>
+    </div>
+    <div id="k-loading-area" class="k-loading">
+      <div class="spinner"></div>
+      <div id="k-loading-txt">正在检索知识库...</div>
+    </div>
+    <div id="k-content-area" style="display:none">
+      <div class="knowledge-img-wrap">
+        <div class="k-badge" id="k-badge">本地知识库</div>
+        <img id="k-img" src="" alt="crop">
+      </div>
+      <h3 class="k-title" id="k-title"></h3>
+      <p class="k-sub" id="k-sub"></p>
+      <div class="k-desc" id="k-desc"></div>
+      <a href="#" id="k-link" target="_blank" class="btn-external">在百度百科中查看详细资料</a>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="image/*" onchange="handleFile(event)">
+
+<script>
+// ─── YOLO 配置（指向自己仓库，国内直接访问）─────────────────
+const MODEL_URL = './yolov8n_web_model/model.json';
+
+const YOLO_CLASSES = [
+  "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat",
+  "traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat",
+  "dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack",
+  "umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball",
+  "kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket",
+  "bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple",
+  "sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake",
+  "chair","couch","potted plant","bed","dining table","toilet","tv","laptop",
+  "mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink",
+  "refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"
+];
+
+const LABELS_ZH = {
+  person:'人',car:'汽车',truck:'货车',bus:'公交车',motorcycle:'摩托车',bicycle:'自行车',
+  dog:'狗',cat:'猫',bird:'鸟',horse:'马',cow:'牛',sheep:'羊',elephant:'大象',
+  bear:'熊',zebra:'斑马',giraffe:'长颈鹿',chair:'椅子',couch:'沙发',bed:'床',toilet:'马桶',
+  'dining table':'餐桌',tv:'电视',laptop:'笔记本电脑',mouse:'鼠标',keyboard:'键盘',
+  'cell phone':'手机',book:'书',bottle:'瓶子',cup:'杯子','sports ball':'球',
+  backpack:'背包',umbrella:'雨伞',handbag:'手提包',suitcase:'行李箱',
+  'traffic light':'交通信号灯','stop sign':'停止标志',airplane:'飞机',boat:'船',
+  clock:'时钟',vase:'花瓶',scissors:'剪刀','potted plant':'盆栽',
+  banana:'香蕉',apple:'苹果',pizza:'披萨','hot dog':'热狗',cake:'蛋糕',
+  sandwich:'三明治',donut:'甜甜圈',fork:'叉子',knife:'餐刀',spoon:'勺子',bowl:'碗',
+  refrigerator:'冰箱',microwave:'微波炉',oven:'烤箱',toaster:'烤面包机',
+  'wine glass':'酒杯',fire_hydrant:'消防栓',bench:'长椅',kite:'风筝',
+  tie:'领带',skateboard:'滑板',surfboard:'冲浪板','tennis racket':'网球拍',
+  'baseball bat':'棒球棒','baseball glove':'棒球手套',remote:'遥控器',
+  train:'列车','parking meter':'停车计费器',frisbee:'飞盘',skis:'滑雪板',
+  snowboard:'单板滑雪',carrot:'胡萝卜',broccoli:'西兰花',orange:'橙子',
+  'teddy bear':'泰迪熊','hair drier':'吹风机',toothbrush:'牙刷',sink:'水槽'
+};
+
+const SCOPE_MAP = {
+  person:['person'],
+  vehicle:['car','motorcycle','airplane','bus','train','truck','boat','bicycle'],
+  animal:['bird','cat','dog','horse','sheep','cow','elephant','bear','zebra','giraffe'],
+  electronics:['tv','laptop','mouse','remote','keyboard','cell phone'],
+  furniture:['chair','couch','potted plant','bed','dining table','toilet','sink','refrigerator'],
+  food:['bottle','wine glass','cup','fork','knife','spoon','bowl','banana','apple','sandwich','orange','broccoli','carrot','hot dog','pizza','donut','cake'],
+  sports:['frisbee','skis','snowboard','sports ball','kite','baseball bat','baseball glove','skateboard','surfboard','tennis racket'],
+};
+
+const LOCAL_KB = {
+  person:{title:'人',sub:'PERSON · 灵长类哺乳动物',desc:'人（Homo sapiens），智人，地球上最高级的灵长类哺乳动物。具有高度发达的大脑皮层，能够进行复杂逻辑推理、语言表达和社会协作。人类文明已延续数万年，发展出科学、艺术、法律等复杂社会体系。'},
+  car:{title:'汽车',sub:'CAR · 四轮机动交通工具',desc:'汽车是由发动机驱动、具有四个或更多车轮的陆地交通工具。1885年由卡尔·本茨发明第一辆汽油驱动汽车。现代汽车涵盖燃油车、混合动力及纯电动车，是全球最主要的个人交通方式。'},
+  truck:{title:'货车',sub:'TRUCK · 重型运输载具',desc:'货车（卡车）是专门用于运输货物的机动车辆，载重量从数百公斤到数十吨不等。广泛应用于物流、建筑、农业等领域，是现代供应链体系中不可或缺的运输工具。'},
+  bus:{title:'公交车',sub:'BUS · 城市公共交通',desc:'公共汽车是一种大型客运交通工具，通常沿固定路线行驶并在指定站点停靠。是城市公共交通系统的重要组成部分，能够高效运送大量乘客，减少城市交通拥堵。'},
+  motorcycle:{title:'摩托车',sub:'MOTORCYCLE · 两轮机动车',desc:'摩托车是一种由发动机驱动的两轮或三轮机动车。具有轻便灵活、燃油经济等特点，广泛应用于短途出行、快递配送及越野运动等场景。'},
+  bicycle:{title:'自行车',sub:'BICYCLE · 人力驱动交通工具',desc:'自行车是依靠人力踩踏脚踏板驱动的两轮交通工具，于19世纪发明。结构简单，零排放，是环保出行的代表，广泛用于日常通勤、休闲运动和竞技比赛。'},
+  dog:{title:'狗',sub:'DOG · 犬科驯化动物',desc:'狗（Canis lupus familiaris）是狼的驯化亚种，已与人类共同生活超过15000年。以忠诚、聪明著称，承担导盲、搜救、陪伴等多种社会功能，是人类最早驯化的动物之一。'},
+  cat:{title:'猫',sub:'CAT · 驯化猫科动物',desc:'猫（Felis catus）是小型驯化猫科动物，约在10000年前被驯化。以独立、好奇的性格著称，是全球最受欢迎的宠物之一。视力敏锐，夜视能力强，是天生的猎手。'},
+  bird:{title:'鸟',sub:'BIRD · 有翼脊椎动物',desc:'鸟类是一类有羽毛、恒温、卵生的脊椎动物，现存约10000余种。由兽脚类恐龙演化而来，绝大多数具备飞翔能力，在生态系统中扮演传粉、播种、害虫天敌等重要角色。'},
+  horse:{title:'马',sub:'HORSE · 奇蹄目哺乳动物',desc:'马（Equus ferus caballus）是大型奇蹄目哺乳动物，约6000年前被人类驯化。历史上是农业生产、战争和交通运输的重要动力来源，现主要用于赛马、马术运动和休闲骑乘。'},
+  cow:{title:'牛',sub:'COW · 家养偶蹄目动物',desc:'牛（Bos taurus）是家养偶蹄目哺乳动物，约8500年前被驯化。是最重要的畜牧动物之一，提供牛肉、牛奶、皮革等产品，也是农业劳动的重要帮手。'},
+  elephant:{title:'大象',sub:'ELEPHANT · 最大陆地动物',desc:'大象是现存最大的陆地动物，分为非洲象和亚洲象两个属。智力极高，具有复杂的社会结构和情感表达能力。目前因栖息地丧失和偷猎面临濒危威胁。'},
+  chair:{title:'椅子',sub:'CHAIR · 单人座椅家具',desc:'椅子是供单人就坐的家具，通常具有四条腿和靠背结构。现代椅子设计融合了人体工程学原理，注重舒适性与美观性，材质涵盖木材、金属、塑料等多种选择。'},
+  couch:{title:'沙发',sub:'COUCH · 多人软质座椅',desc:'沙发是一种软垫多人座椅，内部填充海绵、弹簧等材料。起源于17世纪欧洲，是现代家居客厅的核心家具之一，兼具美观与舒适，材质涵盖皮革、布艺等多种选择。'},
+  tv:{title:'电视',sub:'TV · 视频显示终端',desc:'电视是接收和显示电视广播信号的电子设备，是家庭娱乐和信息获取的核心媒介。从早期黑白显像管发展到今天的4K/8K OLED智能电视，经历了百年技术革新。'},
+  laptop:{title:'笔记本电脑',sub:'LAPTOP · 便携计算设备',desc:'笔记本电脑是一种小型、便携的个人计算机，集成显示屏、键盘和触控板于一体。广泛用于办公、学习、创作和娱乐，随着芯片技术发展，现代笔记本在轻薄化的同时性能持续提升。'},
+  'cell phone':{title:'手机',sub:'SMARTPHONE · 多功能移动终端',desc:'智能手机是集通话、上网、拍照、导航等功能于一体的移动计算设备。自2007年iPhone发布以来，已成为人类最重要的个人电子设备，深刻改变了通讯、消费和社交方式。'},
+  keyboard:{title:'键盘',sub:'KEYBOARD · 文字输入设备',desc:'计算机键盘是主要的文字和命令输入设备，源自打字机键盘布局（QWERTY）。现代键盘分为机械键盘、薄膜键盘等类型，是计算机操作中最基础的人机交互工具。'},
+  mouse:{title:'鼠标',sub:'MOUSE · 指针控制设备',desc:'鼠标是一种手持式计算机指针控制设备，1964年由道格拉斯·恩格尔巴特发明。通过移动鼠标控制屏幕光标位置，是图形界面操作系统不可缺少的外设。'},
+  book:{title:'书',sub:'BOOK · 知识载体',desc:'书是以文字、图像为主要内容的知识载体，经历了竹简、帛书、纸张等介质的演变。是人类文明传承的核心工具，承载着科学、文学、历史等各领域的知识积累与文化记忆。'},
+  bottle:{title:'瓶子',sub:'BOTTLE · 液体容器',desc:'瓶子是用于储存液体的容器，材质包括玻璃、塑料、金属等。在食品饮料、医药、化工等行业广泛应用，是现代包装工业的基础产品之一。'},
+  cup:{title:'杯子',sub:'CUP · 饮用容器',desc:'杯子是用于盛放饮品的容器，材质多样包括陶瓷、玻璃、金属等。是人类最古老的餐具之一，在不同文化中发展出茶杯、咖啡杯、马克杯等多种形式。'},
+  backpack:{title:'背包',sub:'BACKPACK · 双肩背负包',desc:'背包是通过双肩背带背负的包袋，最初用于军事和登山等户外活动。现广泛用于日常通勤、上学、旅行及户外运动，是现代人出行的常用装备。'},
+  clock:{title:'时钟',sub:'CLOCK · 计时仪器',desc:'时钟是测量和显示时间的仪器，从古代日晷、沙漏发展到机械钟、石英钟、原子钟。是人类协调社会活动的基础工具。'},
+  'sports ball':{title:'球',sub:'SPORTS BALL · 运动器械',desc:'运动用球是各类球类运动的核心器械，包括足球、篮球、排球、网球等。不同运动对球的材质、大小、重量有严格规定，球类运动是全球参与人数最多的体育活动类型。'},
+  umbrella:{title:'雨伞',sub:'UMBRELLA · 遮雨遮阳工具',desc:'雨伞是用于遮挡雨水和阳光的便携工具，起源于中国，已有3500余年历史。由伞骨、伞面和伞柄组成，材质从最初的羽毛、丝绸发展到现代的尼龙、碳纤维等高性能材料。'},
+  airplane:{title:'飞机',sub:'AIRPLANE · 固定翼航空器',desc:'飞机是依靠固定机翼产生升力的航空器，1903年由莱特兄弟首飞成功。经过百余年发展，现代客机可承载数百名乘客以近千公里时速飞行，是远程交通最快捷的方式之一。'},
+  boat:{title:'船',sub:'BOAT · 水上交通工具',desc:'船是在水面上行驶的交通运输工具，是人类最古老的交通工具之一。从独木舟、帆船到现代轮船、航母，船舶推动了人类探索、贸易和文化交流的发展历程。'},
+  'potted plant':{title:'盆栽',sub:'POTTED PLANT · 室内绿化植物',desc:'盆栽是种植在花盆或容器中的植物，广泛用于室内外装饰和园艺活动。具有美化环境、净化空气、调节湿度等功效，是现代城市居民亲近自然的重要方式。'},
+  banana:{title:'香蕉',sub:'BANANA · 热带水果',desc:'香蕉（Musa）是热带地区广泛种植的水果，富含钾、维生素B6和膳食纤维。是全球产量最大的水果之一，也是许多发展中国家的重要粮食来源。'},
+  apple:{title:'苹果',sub:'APPLE · 温带落叶水果',desc:'苹果（Malus domestica）是最广泛种植的温带水果之一，原产于中亚。富含维生素C、膳食纤维和多种抗氧化物质，全球年产量超过8000万吨。'},
+  pizza:{title:'披萨',sub:'PIZZA · 意式烤饼',desc:'披萨起源于意大利那不勒斯，是以酵母面团为基础，涂抹番茄酱，覆盖芝士和各种配料后烤制的食品。如今已成为全球最受欢迎的食物之一。'},
+  cake:{title:'蛋糕',sub:'CAKE · 烘焙甜点',desc:'蛋糕是以面粉、鸡蛋、糖、黄油为主要原料烘焙而成的甜点，起源于欧洲。在生日、婚礼、节庆场合扮演重要角色，代表着祝福与喜悦。'},
+  refrigerator:{title:'冰箱',sub:'REFRIGERATOR · 制冷储存设备',desc:'冰箱是利用制冷原理保存食物的家用电器，通过压缩机循环制冷，将食物储存在低温环境中以延长保质期。是现代厨房最重要的家电之一。'},
+  'traffic light':{title:'交通信号灯',sub:'TRAFFIC LIGHT · 道路指挥系统',desc:'交通信号灯通过红、黄、绿三色信号指挥行人和车辆有序通行。1868年首次出现于英国伦敦，是现代城市交通安全的重要保障。'},
+  kite:{title:'风筝',sub:'KITE · 传统空中玩具',desc:'风筝起源于中国，已有2000多年历史，是中国最重要的传统文化符号之一。古代用于军事通信，后演变为休闲娱乐工具。山东潍坊被誉为"世界风筝之都"。'},
+  skateboard:{title:'滑板',sub:'SKATEBOARD · 板类运动器械',desc:'滑板起源于1950年代美国加州的冲浪文化，发展出街式、碗池等多种运动形式，2020年正式列入奥运会项目。'},
+  'teddy bear':{title:'泰迪熊',sub:'TEDDY BEAR · 毛绒玩具',desc:'泰迪熊是一种熊形毛绒玩具，诞生于1902年，灵感来源于美国总统西奥多·罗斯福拒绝猎熊的故事。百余年来成为全球最受欢迎的玩具之一。'},
+  toothbrush:{title:'牙刷',sub:'TOOTHBRUSH · 口腔清洁工具',desc:'牙刷是用于清洁牙齿和牙龈的口腔卫生工具，最早的毛刷形牙刷出现于中国唐代。现代牙刷按动力分为手动和电动两类，是维护口腔健康的日常必备工具。'},
+  sink:{title:'水槽',sub:'SINK · 厨卫洁具',desc:'水槽是厨房和卫生间中用于洗涤的凹形容器，通常由不锈钢、陶瓷或人造石制成，配有进水和排水系统。'},
+  remote:{title:'遥控器',sub:'REMOTE · 无线控制装置',desc:'遥控器是通过红外线或射频信号无线控制电子设备的手持装置，1950年代随电视机的普及而广泛推广，是人机交互的重要便利工具。'},
+};
+
+const PALETTE = ['#FFD60A','#32D74B','#0A84FF','#FF9F0A','#FF375F','#BF5AF2','#5E5CE6','#30D158'];
+
+const appSettings = {
+  useFrontCam:false, highAccuracy:false, nightVision:false,
+  showHud:false, cloudCollab:true, targetScope:'all', baseThreshold:0.35
+};
+
+let yoloModel=null, isZH=true, currentMode='snap', liveStream=null, liveRunning=false;
+let trackerData=[], clickableBoxes=[], frameCount=0, lastPreds=[];
+
+// 离屏 canvas 用于 YOLO 预处理
+const offscreen=document.createElement('canvas');
+offscreen.width=640; offscreen.height=640;
+const offCtx=offscreen.getContext('2d',{willReadFrequently:true});
+
+const $=id=>document.getElementById(id);
+
+// ─── 语言 ────────────────────────────────────────────────
+function toggleLang(){
+  isZH=!isZH;
+  $('btn-lang').textContent=isZH?'EN':'中';
+  $('mode-upload').textContent=isZH?'静态解析':'PHOTO';
+  $('mode-snap').textContent=isZH?'单帧捕获':'CAPTURE';
+  $('mode-live').textContent=isZH?'实时计算':'LIVE';
+  $('hud-title').textContent=isZH?'全局分类统计':'ANALYTICS HUD';
+}
+function setStatus(text,dot='ready'){
+  $('status-text').innerHTML=`<span>${text}</span>`;
+  $('status-dot').className='status-indicator '+dot;
+}
+function openSettings(){$('settings-modal').classList.add('show')}
+function closeSettings(){$('settings-modal').classList.remove('show')}
+function updateScope(val){appSettings.targetScope=val}
+function toggleSetting(type){
+  if(type==='camera'){
+    appSettings.useFrontCam=!appSettings.useFrontCam;
+    $('tog-cam').classList.toggle('on',appSettings.useFrontCam);
+    if(liveRunning){stopLive();toggleLive();}
+  }else if(type==='accuracy'){
+    appSettings.highAccuracy=!appSettings.highAccuracy;
+    $('tog-acc').classList.toggle('on',appSettings.highAccuracy);
+    appSettings.baseThreshold=appSettings.highAccuracy?0.20:0.35;
+  }else if(type==='night'){
+    appSettings.nightVision=!appSettings.nightVision;
+    $('tog-night').classList.toggle('on',appSettings.nightVision);
+    $('video').classList.toggle('night-vision-on',appSettings.nightVision);
+    $('static-img').classList.toggle('night-vision-on',appSettings.nightVision);
+  }else if(type==='hud'){
+    appSettings.showHud=!appSettings.showHud;
+    $('tog-hud').classList.toggle('on',appSettings.showHud);
+    if(!appSettings.showHud)$('analytics-hud').classList.remove('show');
+  }else if(type==='card'){
+    appSettings.cloudCollab=!appSettings.cloudCollab;
+    $('tog-card').classList.toggle('on',appSettings.cloudCollab);
+  }
+}
+function setMode(mode){
+  if(currentMode==='live'&&liveRunning&&mode!=='live')stopLive();
+  currentMode=mode;
+  ['upload','snap','live'].forEach(m=>{$(`mode-${m}`).className=`mode-item${m===mode?' active':''}`;});
+  const inner=$('shutter-inner'),btn=$('shutter-btn');
+  btn.classList.remove('is-live-running');
+  if(mode==='upload'){inner.className='show-upload';inner.style.background='white';}
+  else if(mode==='snap'){inner.className='';inner.style.background='white';}
+  else{inner.className='';inner.style.background=liveRunning?'var(--live-red)':'white';if(liveRunning)btn.classList.add('is-live-running');}
+}
+function onMainAction(){
+  if(!yoloModel)return;
+  if(currentMode==='upload')$('file-input').click();
+  else if(currentMode==='snap')captureMode();
+  else toggleLive();
+}
+
+// ─── YOLO 推理 ────────────────────────────────────────────
+function getLetterboxPad(w,h,size=640){
+  const scale=Math.min(size/w,size/h);
+  return{scale,padX:(size-w*scale)/2,padY:(size-h*scale)/2};
+}
+async function runYolo(mediaEl){
+  const w=mediaEl.videoWidth||mediaEl.naturalWidth;
+  const h=mediaEl.videoHeight||mediaEl.naturalHeight;
+  if(!w||!h)return[];
+  const{scale,padX,padY}=getLetterboxPad(w,h,640);
+  offCtx.fillStyle='#000';offCtx.fillRect(0,0,640,640);
+  if(appSettings.nightVision)offCtx.filter='brightness(1.4) contrast(1.2)';
+  else offCtx.filter='none';
+  offCtx.drawImage(mediaEl,padX,padY,w*scale,h*scale);
+
+  let raw;
+  tf.tidy(()=>{
+    const t=tf.browser.fromPixels(offscreen).div(255).expandDims(0);
+    const out=yoloModel.predict(t);
+    const trans=out.transpose([0,2,1]);
+    raw=trans.dataSync();
+  });
+
+  const boxes=[];
+  const thresh=appSettings.baseThreshold;
+  for(let i=0;i<8400;i++){
+    const off=i*84;
+    let maxScore=0,classIdx=-1;
+    for(let c=0;c<80;c++){const s=raw[off+4+c];if(s>maxScore){maxScore=s;classIdx=c;}}
+    if(maxScore<thresh)continue;
+    const clsName=YOLO_CLASSES[classIdx];
+    if(appSettings.targetScope!=='all'){
+      const allowed=SCOPE_MAP[appSettings.targetScope];
+      if(!allowed||!allowed.includes(clsName))continue;
+    }
+    const cx=raw[off],cy=raw[off+1],bw=raw[off+2],bh=raw[off+3];
+    boxes.push({
+      bbox:[(cx-bw/2-padX)/scale,(cy-bh/2-padY)/scale,bw/scale,bh/scale],
+      class:clsName,score:maxScore
+    });
+  }
+  return applyNMS(boxes);
+}
+
+// ─── NMS ─────────────────────────────────────────────────
+function iouCalc(a,b){
+  const[ax,ay,aw,ah]=a.bbox,[bx,by,bw,bh]=b.bbox;
+  const ix=Math.max(ax,bx),iy=Math.max(ay,by);
+  const iw=Math.min(ax+aw,bx+bw)-ix,ih=Math.min(ay+ah,by+bh)-iy;
+  if(iw<=0||ih<=0)return 0;
+  const inter=iw*ih;
+  return inter/(aw*ah+bw*bh-inter);
+}
+function applyNMS(preds,iouThresh=0.45,ioMinThresh=0.50){
+  const sorted=[...preds].sort((a,b)=>b.score-a.score);
+  const selected=[];
+  for(const p of sorted){
+    let dup=false;
+    for(const s of selected){
+      if(p.class===s.class){
+        const iou=iouCalc(p,s);
+        const[ax,ay,aw,ah]=p.bbox,[bx,by,bw,bh]=s.bbox;
+        const ix=Math.max(ax,bx),iy=Math.max(ay,by);
+        const iw=Math.min(ax+aw,bx+bw)-ix,ih=Math.min(ay+ah,by+bh)-iy;
+        const inter=(iw>0&&ih>0)?iw*ih:0;
+        const ioMin=inter/Math.min(aw*ah,bw*bh);
+        if(iou>iouThresh||ioMin>ioMinThresh){dup=true;break;}
+      }
+    }
+    if(!dup)selected.push(p);
+  }
+  return selected.slice(0,15);
+}
+
+// ─── 追踪平滑 ─────────────────────────────────────────────
+function updateTracker(newPreds){
+  const SMOOTH=0.25,THRESH=0.22,MAX_MISS=2;
+  const matched=new Set(),next=[];
+  for(const track of trackerData){
+    let best=null,bestIoU=0,bestIdx=-1;
+    for(let i=0;i<newPreds.length;i++){
+      if(matched.has(i)||newPreds[i].class!==track.class)continue;
+      const iou=iouCalc(track,newPreds[i]);
+      if(iou>bestIoU&&iou>THRESH){bestIoU=iou;best=newPreds[i];bestIdx=i;}
+    }
+    if(best){
+      matched.add(bestIdx);
+      const[tx,ty,tw,th]=track.bbox,[nx,ny,nw,nh]=best.bbox;
+      track.bbox=[tx+(nx-tx)*SMOOTH,ty+(ny-ty)*SMOOTH,tw+(nw-tw)*SMOOTH,th+(nh-th)*SMOOTH];
+      track.score=track.score*0.6+best.score*0.4;
+      track.missingFrames=0;next.push(track);
+    }else{
+      track.missingFrames=(track.missingFrames||0)+1;
+      if(track.missingFrames<=MAX_MISS)next.push(track);
+    }
+  }
+  for(let i=0;i<newPreds.length;i++)if(!matched.has(i))next.push({...newPreds[i],missingFrames:0});
+  trackerData=next;return trackerData;
+}
+
+// ─── 渲染参数（精确 letterbox 偏移）─────────────────────
+function getMediaRenderParams(mediaEl,containerEl,fitMode='cover'){
+  let mw=mediaEl.videoWidth||mediaEl.naturalWidth;
+  let mh=mediaEl.videoHeight||mediaEl.naturalHeight;
+  if(!mw||!mh)return null;
+  const cw=containerEl.clientWidth,ch=containerEl.clientHeight;
+  const sx=cw/mw,sy=ch/mh;
+  const scale=fitMode==='cover'?Math.max(sx,sy):Math.min(sx,sy);
+  const rw=mw*scale,rh=mh*scale;
+  const offsetX=(cw-rw)/2,offsetY=(ch-rh)/2;
+  return{scale,offsetX,offsetY,cw,ch};
+}
+function syncCanvasSize(){
+  const vp=$('viewport'),ov=$('overlay');
+  if(ov.width!==vp.clientWidth||ov.height!==vp.clientHeight){ov.width=vp.clientWidth;ov.height=vp.clientHeight;}
+}
+window.addEventListener('resize',()=>{
+  syncCanvasSize();
+  if(!liveRunning&&trackerData.length>0){
+    const el=currentMode==='upload'?$('static-img'):$('video');
+    drawBoxes($('overlay').getContext('2d'),trackerData,getMediaRenderParams(el,$('viewport'),currentMode==='upload'?'contain':'cover'));
+  }
+});
+
+// ─── 绘制 ────────────────────────────────────────────────
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+function updateHUD(preds){
+  const hud=$('analytics-hud');
+  if(!appSettings.showHud||!preds.length){hud.classList.remove('show');return;}
+  hud.classList.add('show');
+  const counts={};
+  preds.forEach(p=>{if(!p.missingFrames)counts[p.class]=(counts[p.class]||0)+1;});
+  $('hud-content').innerHTML=Object.entries(counts).map(([cls,n])=>{
+    const ci=cls.split('').reduce((a,b)=>a+b.charCodeAt(0),0)%PALETTE.length;
+    const name=(LOCAL_KB[cls]&&LOCAL_KB[cls].title)||LABELS_ZH[cls]||cls;
+    return`<div class="hud-row"><div class="hud-dot-wrap"><div class="hud-dot" style="background:${PALETTE[ci]}"></div><span>${name}</span></div><span class="hud-count">${n}</span></div>`;
+  }).join('');
+}
+function drawBoxes(ctx,preds,rp){
+  ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+  clickableBoxes=[];
+  if(!rp)return;
+  const{scale,offsetX,offsetY,cw}=rp;
+  preds.forEach(p=>{
+    ctx.globalAlpha=p.missingFrames>0?0.4:1;
+    let x=p.bbox[0]*scale+offsetX;
+    const y=p.bbox[1]*scale+offsetY,w=p.bbox[2]*scale,h=p.bbox[3]*scale;
+    if(appSettings.useFrontCam&&currentMode!=='upload')x=cw-x-w;
+    clickableBoxes.push({...p,screenBox:[x,y,w,h]});
+    const ci=p.class.split('').reduce((a,b)=>a+b.charCodeAt(0),0)%PALETTE.length;
+    const color=PALETTE[ci];
+    const cs=Math.min(w,h,30);
+    // 角标框
+    ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineCap='round';
+    ctx.globalAlpha=(p.missingFrames>0?0.4:1)*0.15;
+    roundRect(ctx,x,y,w,h,6);ctx.stroke();
+    ctx.globalAlpha=p.missingFrames>0?0.4:1;
+    ctx.beginPath();ctx.moveTo(x,y+cs);ctx.lineTo(x,y);ctx.lineTo(x+cs,y);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+w-cs,y);ctx.lineTo(x+w,y);ctx.lineTo(x+w,y+cs);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,y+h-cs);ctx.lineTo(x,y+h);ctx.lineTo(x+cs,y+h);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x+w-cs,y+h);ctx.lineTo(x+w,y+h);ctx.lineTo(x+w,y+h-cs);ctx.stroke();
+    // 标签
+    const kb=LOCAL_KB[p.class];
+    const name=kb?kb.title:(LABELS_ZH[p.class]||p.class);
+    const txt=`${name}  ${Math.round(p.score*100)}%`;
+    ctx.font='600 12px -apple-system,system-ui,sans-serif';
+    const tw=ctx.measureText(txt).width;
+    const ph=24,pw=tw+20,pr=12;
+    const px=Math.max(2,Math.min(x+w/2-pw/2,ctx.canvas.width-pw-2));
+    const py=y-ph-8<0?y+8:y-ph-8;
+    ctx.save();roundRect(ctx,px,py,pw,ph,pr);
+    ctx.fillStyle='rgba(20,20,20,0.78)';ctx.fill();
+    ctx.fillStyle=color;ctx.beginPath();ctx.arc(px+10,py+ph/2,4,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+    ctx.fillStyle='#fff';ctx.font='600 12px -apple-system,system-ui,sans-serif';
+    ctx.fillText(txt,px+20,py+16);
+    ctx.globalAlpha=1;
+  });
+  updateHUD(preds);
+}
+function clearAll(){
+  const ov=$('overlay');
+  if(ov&&ov.getContext)ov.getContext('2d').clearRect(0,0,ov.width,ov.height);
+  $('analytics-hud').classList.remove('show');
+  trackerData=[];clickableBoxes=[];
+}
+
+// ─── 加载模型（自托管，国内直接访问）────────────────────
+async function loadModel(){
+  try{
+    $('progress-container').style.opacity='1';
+    setStatus('加载 YOLOv8s 模型...','loading');
+    await tf.ready();
+    // 加载进度模拟（tfjs loadGraphModel 不暴露进度回调）
+    let fakeP=0;
+    const timer=setInterval(()=>{
+      fakeP=Math.min(fakeP+2,88);
+      $('progress-bar').style.width=fakeP+'%';
+      setStatus(`YOLOv8s 加载中 ${fakeP}%`,'loading');
+    },200);
+    yoloModel=await tf.loadGraphModel(MODEL_URL);
+    clearInterval(timer);
+    // 预热
+    tf.tidy(()=>{yoloModel.predict(tf.zeros([1,640,640,3]));});
+    $('progress-bar').style.width='100%';
+    setTimeout(()=>{
+      $('progress-container').style.opacity='0';
+      setStatus('YOLOv8s 就绪 · 80类目标','ready');
+    },400);
+  }catch(e){
+    console.error(e);
+    $('progress-container').style.opacity='0';
+    setStatus('模型加载失败，请刷新','error');
+  }
+}
+
+// ─── 摄像头 ───────────────────────────────────────────────
+async function getCameraStream(){
+  const stream=await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:appSettings.useFrontCam?'user':'environment',width:{ideal:1280},height:{ideal:720}}
+  });
+  $('video').style.transform=appSettings.useFrontCam?'scaleX(-1)':'scaleX(1)';
+  return stream;
+}
+
+// ─── 文件上传 ─────────────────────────────────────────────
+async function handleFile(e){
+  const file=e.target.files[0];if(!file)return;
+  const img=new Image();
+  img.onload=async()=>{
+    $('video').style.display='none';
+    $('static-img').src=img.src;$('static-img').style.display='block';
+    setStatus('YOLOv8s 解析中...','loading');clearAll();
+    await new Promise(r=>setTimeout(r,100));
+    const preds=await runYolo(img);
+    trackerData=preds;syncCanvasSize();
+    drawBoxes($('overlay').getContext('2d'),preds,getMediaRenderParams($('static-img'),$('viewport'),'contain'));
+    setStatus(`解析完成 · ${preds.length} 个目标`,'ready');
+  };
+  img.src=URL.createObjectURL(file);e.target.value='';
+}
+
+// ─── 单帧捕获 ─────────────────────────────────────────────
+async function captureMode(){
+  try{
+    const stream=await getCameraStream();
+    const video=$('video'),vp=$('viewport');
+    $('static-img').style.display='none';video.style.display='block';
+    video.srcObject=stream;await video.play();
+    setStatus('捕获帧中...','loading');clearAll();
+    vp.style.background='#fff';video.style.opacity='0.5';
+    setTimeout(()=>{vp.style.background='#111';video.style.opacity='1';},150);
+    await new Promise(r=>setTimeout(r,900));
+    const preds=await runYolo(video);
+    trackerData=preds;syncCanvasSize();
+    drawBoxes($('overlay').getContext('2d'),preds,getMediaRenderParams(video,vp,'cover'));
+    stream.getTracks().forEach(t=>t.stop());video.srcObject=null;
+    setStatus(`捕获完成 · ${preds.length} 个目标`,'ready');
+  }catch(err){setStatus('摄像头访问失败','error');}
+}
+
+// ─── 实时检测 ─────────────────────────────────────────────
+async function toggleLive(){
+  if(liveRunning){stopLive();return;}
+  try{
+    liveStream=await getCameraStream();
+    const video=$('video'),vp=$('viewport');
+    $('static-img').style.display='none';video.style.display='block';
+    video.srcObject=liveStream;await video.play();
+    liveRunning=true;trackerData=[];frameCount=0;lastPreds=[];
+    $('shutter-btn').classList.add('is-live-running');
+    $('shutter-inner').style.background='var(--live-red)';
+    setStatus('YOLOv8s 实时计算中','ready');clearAll();
+    const ctx=$('overlay').getContext('2d');
+    async function detectLoop(){
+      if(!liveRunning)return;
+      if(video.readyState===4){
+        syncCanvasSize();
+        const rp=getMediaRenderParams(video,vp,'cover');
+        // 每2帧运行一次推理，平衡流畅度与性能
+        if(frameCount%2===0){
+          const preds=await runYolo(video);
+          lastPreds=preds;
+          trackerData=updateTracker(preds);
+        }
+        drawBoxes(ctx,trackerData,rp);
+        frameCount++;
+      }
+      if(liveRunning)requestAnimationFrame(detectLoop);
+    }
+    detectLoop();
+  }catch(err){setStatus('摄像头访问失败','error');}
+}
+function stopLive(){
+  liveRunning=false;trackerData=[];
+  if(liveStream){liveStream.getTracks().forEach(t=>t.stop());liveStream=null;}
+  $('shutter-btn').classList.remove('is-live-running');
+  $('shutter-inner').style.background='white';
+  clearAll();setStatus('YOLOv8s 就绪 · 80类目标','ready');
+}
+
+// ─── 知识卡片点击 ─────────────────────────────────────────
+$('overlay').addEventListener('click',e=>{
+  if(!appSettings.cloudCollab)return;
+  const rect=e.target.getBoundingClientRect();
+  const x=e.clientX-rect.left,y=e.clientY-rect.top;
+  const ripple=document.createElement('div');
+  ripple.className='touch-ripple';ripple.style.left=`${x}px`;ripple.style.top=`${y}px`;
+  $('overlay').parentNode.appendChild(ripple);
+  setTimeout(()=>ripple.remove(),600);
+  let clickedBox=null;
+  for(let i=clickableBoxes.length-1;i>=0;i--){
+    const[bx,by,bw,bh]=clickableBoxes[i].screenBox;
+    if(x>=bx-20&&x<=bx+bw+20&&y>=by-20&&y<=by+bh+20){clickedBox=clickableBoxes[i];break;}
+  }
+  if(clickedBox)showKnowledgeCard(clickedBox);
+  else showAreaAnalysis(x,y);
+});
+
+function cropToBase64(sx,sy,sw,sh){
+  const sourceMedia=currentMode==='upload'?$('static-img'):$('video');
+  const c=document.createElement('canvas');
+  c.width=Math.max(sw,1);c.height=Math.max(sh,1);
+  c.getContext('2d').drawImage(sourceMedia,sx,sy,sw,sh,0,0,sw,sh);
+  return c.toDataURL('image/jpeg');
+}
+
+function showKnowledgeCard(boxData){
+  const sheet=$('knowledge-sheet');sheet.classList.add('show');
+  $('k-loading-area').style.display='flex';$('k-content-area').style.display='none';
+  $('k-img').src=cropToBase64(...boxData.bbox);
+  const kb=LOCAL_KB[boxData.class];
+  const zhName=kb?kb.title:(LABELS_ZH[boxData.class]||boxData.class);
+  $('k-badge').className='k-badge';$('k-badge').innerHTML='本地知识图谱';
+  $('k-title').textContent=kb?kb.title:zhName;
+  $('k-sub').textContent=kb?kb.sub:`${boxData.class.toUpperCase()} · 置信度 ${Math.round(boxData.score*100)}%`;
+  $('k-desc').textContent=kb?kb.desc:`系统已识别目标：${zhName}，置信度 ${Math.round(boxData.score*100)}%。`;
+  $('k-link').href=`https://baike.baidu.com/item/${encodeURIComponent(zhName)}`;
+  $('k-link').textContent='在百度百科中查看详细资料';
+  $('k-link').style.display='block';
+  setTimeout(()=>{$('k-loading-area').style.display='none';$('k-content-area').style.display='block';},250);
+}
+
+function showAreaAnalysis(x,y){
+  const sheet=$('knowledge-sheet');sheet.classList.add('show');
+  $('k-loading-area').style.display='flex';$('k-content-area').style.display='none';
+  $('k-badge').className='k-badge cloud-mode';$('k-badge').innerHTML='区域分析';
+  const sourceMedia=currentMode==='upload'?$('static-img'):$('video');
+  const rp=getMediaRenderParams(sourceMedia,$('viewport'),currentMode==='upload'?'contain':'cover');
+  const cs=200;
+  if(rp){
+    const rx=(x-rp.offsetX)/rp.scale-cs/2,ry=(y-rp.offsetY)/rp.scale-cs/2;
+    $('k-img').src=cropToBase64(rx,ry,cs,cs);
+  }
+  const nearby=clickableBoxes.filter(b=>{
+    const[bx,by,bw,bh]=b.screenBox;
+    return Math.abs(x-(bx+bw/2))<130&&Math.abs(y-(by+bh/2))<130;
+  });
+  setTimeout(()=>{
+    if(nearby.length>0){
+      const names=nearby.map(b=>{const kb=LOCAL_KB[b.class];return kb?kb.title:(LABELS_ZH[b.class]||b.class);}).join('、');
+      $('k-title').textContent='区域目标';
+      $('k-sub').textContent='REGION ANALYSIS';
+      $('k-desc').textContent=`该区域检测到：${names}。点击具体目标框可查看详细知识卡片。`;
+    }else{
+      $('k-title').textContent='未识别区域';
+      $('k-sub').textContent='UNDETECTED REGION';
+      $('k-desc').textContent='当前区域未检测到目标，可能因为目标尺寸较小、被遮挡或不在识别范围内。可尝试开启「高精度推理模式」提高灵敏度。';
+    }
+    $('k-link').style.display='none';
+    $('k-loading-area').style.display='none';$('k-content-area').style.display='block';
+  },250);
+}
+
+loadModel();
+</script>
+</body>
+</html>
