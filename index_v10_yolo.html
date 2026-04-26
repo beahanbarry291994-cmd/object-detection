@@ -142,17 +142,17 @@ body, html {
   padding: 16px 0; border-bottom: 0.5px solid rgba(255,255,255,0.1); 
 }
 .setting-row:last-child { border-bottom: none; }
-.setting-info { flex: 1; padding-right: 16px; } /* 保证文字不挤压右侧控件 */
+.setting-info { flex: 1; padding-right: 16px; } 
 .setting-info h3 { font-size: 15px; font-weight: 500; margin: 0 0 6px 0; letter-spacing: 0.5px;}
 .setting-info p { font-size: 12px; color: var(--text-sub); margin: 0; line-height: 1.4;}
 
 .apple-select {
-  flex-shrink: 0; /* 强制对齐边缘 */
+  flex-shrink: 0; 
   background: rgba(255,255,255,0.1); color: white; border: none; padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 500; outline: none; appearance: none; text-align: right; cursor: pointer; max-width: 140px;
 }
 .apple-select option { background: #222; color: white; }
 
-.toggle-switch { flex-shrink: 0; /* 强制对齐边缘 */ width: 46px; height: 26px; background: #39393d; border-radius: 13px; position: relative; cursor: pointer; transition: background 0.3s;}
+.toggle-switch { flex-shrink: 0; width: 46px; height: 26px; background: #39393d; border-radius: 13px; position: relative; cursor: pointer; transition: background 0.3s;}
 .toggle-switch.on { background: var(--apple-green); }
 .toggle-knob { width: 22px; height: 22px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
 .toggle-switch.on .toggle-knob { transform: translateX(20px); }
@@ -330,22 +330,17 @@ body, html {
 <input type="file" id="file-input" accept="image/*" onchange="handleFile(event)">
 
 <script>
-// ==========================================
-// V10 YOLO EDITION: Core ML Setup & Cloud Collaborative Network
-// ==========================================
-
-// Gemini API Key for Open Vocabulary Cloud Scan (Environment Injected)
 const apiKey = ""; 
 
-// 使用多节点高可用 CDN 阵列，解决模型权重 404 无法加载的问题
+// 使用更稳健的 CDN 路径列表，确保 YOLOv8 模型不报 404 错误
 const YOLO_URLS_S = [
-  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@gh-pages/model/yolov8s_web_model/model.json',
-  'https://huggingface.co/salim4n/yolov8s_web_model/resolve/main/model.json'
+  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@master/public/yolov8s_web_model/model.json',
+  'https://cdn.jsdelivr.net/gh/HugoZeng/YOLOv8-TFJS@main/public/yolov8s_web_model/model.json'
 ];
 const YOLO_URLS_N = [
-  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@gh-pages/model/yolov8n_web_model/model.json',
-  'https://huggingface.co/salim4n/yolov8n_web_model/resolve/main/model.json',
-  'https://cdn.jsdelivr.net/gh/HugoZeng/YOLOv8-TFJS@main/public/yolov8n_web_model/model.json'
+  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@master/public/yolov8n_web_model/model.json',
+  'https://cdn.jsdelivr.net/gh/HugoZeng/YOLOv8-TFJS@main/public/yolov8n_web_model/model.json',
+  'https://cdn.jsdelivr.net/gh/Hyuto/yolov8-tfjs@main/public/yolov8n_web_model/model.json'
 ];
 
 const YOLO_CLASSES = [
@@ -411,7 +406,6 @@ offscreenCanvas.width = 640; offscreenCanvas.height = 640;
 const offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
 const $ = id => document.getElementById(id);
 
-// --- 多语言与状态 ---
 const L = {
   statusLoading:  {zh:'建立神经网络拓扑...', en:'Init YOLO Engine'},
   statusReady:    {zh:'YOLOv8 计算层就绪',   en:'Ready'},
@@ -437,7 +431,6 @@ function setStatus(key, dot = 'ready', extraHTML = '') {
   $('status-dot').className = 'status-indicator ' + dot;
 }
 
-// --- 设置交互 ---
 function openSettings() { $('settings-modal').classList.add('show'); }
 function closeSettings() { $('settings-modal').classList.remove('show'); }
 function updateScope(val) { appSettings.targetScope = val; }
@@ -487,7 +480,6 @@ function onMainAction() {
   else if (currentMode === 'live') toggleLive();
 }
 
-// --- YOLO 解码引擎 ---
 function getLetterboxPad(w, h, targetSize = 640) {
   const scale = Math.min(targetSize / w, targetSize / h);
   const padX = (targetSize - w * scale) / 2;
@@ -605,7 +597,6 @@ function updateTracker(newPreds) {
   return trackerData;
 }
 
-// --- 渲染 ---
 function syncCanvasSize() {
   const vp = $('viewport'), ov = $('overlay');
   if (ov.width !== vp.clientWidth || ov.height !== vp.clientHeight) { ov.width = vp.clientWidth; ov.height = vp.clientHeight; }
@@ -715,10 +706,12 @@ async function getCameraStream() {
   return stream;
 }
 
-// --- 优雅的 YOLOv8 模型加载器 (多节点容错与自动降级) ---
+// 经过修复的加载器：提供可靠的主 CDN 与备用节点，并在无法访问时抛出错误
 async function loadModel() {
   try {
     yoloModel = null; 
+    await tf.ready(); 
+    
     $('progress-container').style.opacity = '1';
     $('progress-bar').style.width = '0%';
     setStatus('statusLoading', 'loading', '<span class="progress-pct">0%</span>');
@@ -732,21 +725,30 @@ async function loadModel() {
     const loadWithFallback = async (urls) => {
         for (let url of urls) {
             try {
-                return await tf.loadGraphModel(url, { onProgress });
+                setStatus('statusLoading', 'loading', `<span class="progress-pct">请求节点中...</span>`);
+                const model = await new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => reject(new Error('节点响应超时')), 15000);
+                    tf.loadGraphModel(url, { onProgress }).then(m => {
+                        clearTimeout(timer); resolve(m);
+                    }).catch(err => {
+                        clearTimeout(timer); reject(err);
+                    });
+                });
+                return model;
             } catch (e) {
-                console.warn(`节点 ${url} 加载失败，切换下一个备用节点...`);
+                console.warn(`节点 ${url} 加载失败或超时，正在无缝切换备用节点...`);
             }
         }
-        throw new Error("所有 CDN 节点均无法加载模型文件。");
+        throw new Error("所有 CDN 加速节点均无法响应。");
     };
 
     try {
         const targetUrls = appSettings.highAccuracy ? YOLO_URLS_S : YOLO_URLS_N;
         yoloModel = await loadWithFallback(targetUrls);
     } catch (e) {
-        console.warn("YOLOv8 优先模型加载失败，自动触发柔性降级到极速版 YOLOv8n...", e);
+        console.warn("主模型加载失败，自动触发柔性降级到备用链路...", e);
         $('progress-bar').style.width = '0%';
-        setStatus('statusLoading', 'loading', '<span class="progress-pct">降级加载中...</span>');
+        setStatus('statusLoading', 'loading', '<span class="progress-pct">降级请求中...</span>');
         yoloModel = await loadWithFallback(YOLO_URLS_N);
     }
 
@@ -758,7 +760,7 @@ async function loadModel() {
     }, 400);
 
   } catch (e) { 
-    console.error("模型底层引擎挂载失败:", e);
+    console.error("计算层挂载失败:", e);
     $('progress-container').style.opacity = '0';
     setStatus('statusError', 'error'); 
   }
@@ -841,7 +843,6 @@ function stopLive() {
   clearCanvasAndResults(); if ($('status-dot').className.includes('ready')) setStatus('statusReady', 'ready');
 }
 
-// --- V10 端云协同触控逻辑 (Cloud-Edge Event Dispatcher) ---
 $('overlay').addEventListener('click', (e) => {
   if (!appSettings.cloudCollab) return;
   const rect = e.target.getBoundingClientRect();
@@ -869,7 +870,6 @@ $('overlay').addEventListener('click', (e) => {
   }
 });
 
-// --- 分支 A：已知物体触发网络图谱 ---
 async function triggerNetworkKnowledgeCard(boxData) {
   const sheet = $('knowledge-sheet');
   sheet.classList.add('show');
@@ -897,15 +897,11 @@ async function triggerNetworkKnowledgeCard(boxData) {
 
   try {
     const res = await fetch(`https://zh.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(zhName)}`);
-    
     if (!res.ok) throw new Error("网络图谱未收录该精确词条");
     
     const data = await res.json();
     let descText = "";
-    
-    if (data && data.extract) {
-        descText = data.extract;
-    }
+    if (data && data.extract) descText = data.extract;
     
     if (descText.length < 15) {
       descText = `边缘计算架构已将该目标拓扑判定为【${zhName}】。该类别隶属于公共视觉识别集。受限于开源数据节点的摘要长度，请查阅底层文献以获取详细释义。`;
@@ -919,7 +915,6 @@ async function triggerNetworkKnowledgeCard(boxData) {
   }
 }
 
-// --- 分支 B：未知物体触发云端多模态大模型 (Open Vocabulary) ---
 async function triggerCloudCollabScan(clickX, clickY) {
   const sheet = $('knowledge-sheet');
   sheet.classList.add('show');
