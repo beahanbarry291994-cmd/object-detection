@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>目标检测 / Object Detection</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #0f0f0f;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  #header {
+    padding: 14px 16px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 0.5px solid #333;
+  }
+  #header h1 { font-size: 16px; font-weight: 500; }
+  #header h1 span { color: #aaa; font-size: 13px; font-weight: 400; display: block; }
+  #lang-btn {
+    font-size: 12px; padding: 4px 10px;
+    border-radius: 20px; border: 0.5px solid #444;
+    background: transparent; color: #ccc; cursor: pointer;
+  }
+  #main {
+    flex: 1; position: relative; background: #111;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; min-height: 320px;
+  }
+  #placeholder { text-align: center; padding: 2rem; }
+  #placeholder svg { opacity: 0.25; margin-bottom: 1rem; }
+  #placeholder p { color: #666; font-size: 14px; line-height: 1.7; }
+  #canvas-wrap { position: relative; width: 100%; display: none; }
+  #canvas-wrap video, #canvas-wrap img {
+    display: block; width: 100%; height: auto;
+    max-height: 62vh; object-fit: contain;
+  }
+  #overlay {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; pointer-events: none;
+  }
+  #status-bar {
+    padding: 8px 16px; background: #1a1a1a;
+    font-size: 12px; color: #888;
+    min-height: 30px; display: flex; align-items: center; gap: 8px;
+  }
+  #status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #444; flex-shrink: 0;
+  }
+  #status-dot.loading { background: #f59e0b; animation: pulse 1s infinite; }
+  #status-dot.ready   { background: #22c55e; }
+  #status-dot.error   { background: #ef4444; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  #results {
+    padding: 12px 16px; background: #111;
+    max-height: 200px; overflow-y: auto;
+  }
+  #results-list { display: flex; flex-direction: column; gap: 6px; }
+  .result-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: #1a1a1a;
+    border-radius: 8px; border-left: 3px solid #555;
+  }
+  .result-label { font-size: 13px; font-weight: 500; }
+  .result-conf  { font-size: 12px; color: #aaa; }
+  .conf-bar { height: 4px; border-radius: 2px; background: #333; margin-top: 4px; overflow: hidden; }
+  .conf-fill { height: 100%; border-radius: 2px; }
+  #toolbar {
+    padding: 14px 16px; display: flex; gap: 10px;
+    border-top: 0.5px solid #222;
+  }
+  .tool-btn {
+    flex: 1; padding: 11px 6px; border-radius: 10px;
+    border: 0.5px solid #333; background: #1a1a1a; color: #ccc;
+    font-size: 12px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    transition: all 0.15s;
+  }
+  .tool-btn svg { opacity: 0.7; }
+  .tool-btn.active, .tool-btn:hover {
+    background: #252525; border-color: #555; color: #fff;
+  }
+  .tool-btn.active svg { opacity: 1; }
+  #file-input { display: none; }
+  #no-results { color: #555; font-size: 13px; text-align: center; padding: 12px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1 id="title-main">目标检测<span id="title-sub">Object Detection</span></h1>
+  <button id="lang-btn" onclick="toggleLang()">EN</button>
+</div>
+
+<div id="main">
+  <div id="placeholder">
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="4"  y="4"  width="20" height="20" rx="2" stroke="white" stroke-width="2.5" fill="none"/>
+      <rect x="40" y="4"  width="20" height="20" rx="2" stroke="white" stroke-width="2.5" fill="none"/>
+      <rect x="4"  y="40" width="20" height="20" rx="2" stroke="white" stroke-width="2.5" fill="none"/>
+      <rect x="40" y="40" width="20" height="20" rx="2" stroke="white" stroke-width="2.5" fill="none"/>
+      <rect x="18" y="18" width="28" height="28" rx="4" stroke="white" stroke-width="2" fill="none" stroke-dasharray="3 3"/>
+    </svg>
+    <p id="ph-text">选择下方方式开始检测<br>Choose a mode below to start</p>
+  </div>
+  <div id="canvas-wrap">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+</div>
+
+<div id="status-bar">
+  <div id="status-dot" class="loading"></div>
+  <span id="status-text">正在加载模型… Loading model…</span>
+</div>
+
+<div id="results">
+  <div id="results-list"></div>
+</div>
+
+<div id="toolbar">
+  <label class="tool-btn" for="file-input">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="3" y="8" width="18" height="13" rx="2"/>
+      <path d="M7 8V6a2 2 0 012-2h6a2 2 0 012 2v2"/>
+      <circle cx="12" cy="14" r="3"/>
+    </svg>
+    <span id="btn-photo-lbl">上传图片</span>
+  </label>
+  <input type="file" id="file-input" accept="image/*" onchange="handleFile(event)">
+
+  <button class="tool-btn" id="btn-snap" onclick="captureMode()">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M20.94 11A8.994 8.994 0 0012 3.06 8.994 8.994 0 003.06 12 8.994 8.994 0 0012 20.94 8.994 8.994 0 0020.94 13"/>
+      <path d="M19 6l1-2 2 1-2 2z"/>
+    </svg>
+    <span id="btn-snap-lbl">拍照检测</span>
+  </button>
+
+  <button class="tool-btn" id="btn-live" onclick="liveMode()">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <path d="M15 10l4.553-2.277A1 1 0 0121 8.68v6.64a1 1 0 01-1.447.9L15 14"/>
+      <rect x="2" y="7" width="13" height="10" rx="2"/>
+    </svg>
+    <span id="btn-live-lbl">实时检测</span>
+  </button>
+</div>
+
+<script>
+const LABELS_ZH = {
+  person:'人', car:'汽车', truck:'货车', bus:'公共汽车', motorcycle:'摩托车', bicycle:'自行车',
+  dog:'狗', cat:'猫', bird:'鸟', horse:'马', cow:'牛', sheep:'羊', elephant:'大象',
+  bear:'熊', zebra:'斑马', giraffe:'长颈鹿',
+  chair:'椅子', couch:'沙发', bed:'床', toilet:'马桶',
+  'dining table':'餐桌', tv:'电视', laptop:'笔记本', mouse:'鼠标', keyboard:'键盘',
+  'cell phone':'手机', book:'书', bottle:'瓶子', cup:'杯子',
+  'sports ball':'球', backpack:'背包', umbrella:'雨伞', handbag:'手提包',
+  suitcase:'行李箱', 'traffic light':'交通灯', 'stop sign':'停止标志',
+  airplane:'飞机', boat:'船', clock:'时钟', vase:'花瓶', scissors:'剪刀',
+  'potted plant':'盆栽', banana:'香蕉', apple:'苹果', pizza:'披萨',
+  'hot dog':'热狗', cake:'蛋糕', sandwich:'三明治', donut:'甜甜圈',
+  fork:'叉子', knife:'刀', spoon:'勺子', bowl:'碗',
+  refrigerator:'冰箱', microwave:'微波炉', oven:'烤箱', toaster:'烤面包机',
+  'wine glass':'酒杯', fire_hydrant:'消防栓', bench:'长椅', kite:'风筝',
+  tie:'领带', skateboard:'滑板', surfboard:'冲浪板',
+  tennis_racket:'网球拍', baseball_bat:'棒球棒'
+};
+
+const COLORS = ['#3b82f6','#6366f1','#22c55e','#f59e0b','#ef4444','#ec4899','#14b8a6','#f97316','#8b5cf6','#06b6d4'];
+
+let model = null, isZH = true, liveStream = null, liveRunning = false;
+
+const $ = id => document.getElementById(id);
+
+const langData = {
+  titleMain:      { zh: '目标检测',                      en: 'Object Detection' },
+  titleSub:       { zh: 'Object Detection',              en: '目标检测' },
+  statusLoading:  { zh: '正在加载模型…',                  en: 'Loading model…' },
+  statusReady:    { zh: '模型就绪，选择检测方式',           en: 'Model ready. Choose a mode.' },
+  statusError:    { zh: '模型加载失败，请刷新重试',          en: 'Model load failed. Please refresh.' },
+  statusDetecting:{ zh: '检测中…',                       en: 'Detecting…' },
+  statusDone:     { zh: '检测完成',                      en: 'Detection complete' },
+  statusLive:     { zh: '实时检测运行中（再次点击停止）',    en: 'Live detection running (tap again to stop)' },
+  noResult:       { zh: '未检测到目标',                   en: 'No objects detected' },
+  btnPhoto:       { zh: '上传图片',                      en: 'Upload' },
+  btnSnap:        { zh: '拍照检测',                      en: 'Capture' },
+  btnLive:        { zh: '实时检测',                      en: 'Live' },
+};
+
+function t(key) { return langData[key][isZH ? 'zh' : 'en']; }
+
+function toggleLang() { isZH = !isZH; applyLang(); }
+
+function applyLang() {
+  $('title-main').firstChild.textContent = t('titleMain');
+  $('title-sub').textContent = t('titleSub');
+  $('lang-btn').textContent = isZH ? 'EN' : '中';
+  $('btn-photo-lbl').textContent = t('btnPhoto');
+  $('btn-snap-lbl').textContent = t('btnSnap');
+  $('btn-live-lbl').textContent = t('btnLive');
+  const nr = $('no-results');
+  if (nr) nr.textContent = t('noResult');
+}
+
+function setStatus(key, dot = 'ready') {
+  $('status-text').textContent = t(key);
+  $('status-dot').className = dot;
+}
+
+async function loadModel() {
+  try {
+    model = await cocoSsd.load();
+    setStatus('statusReady', 'ready');
+  } catch (e) {
+    setStatus('statusError', 'error');
+  }
+}
+
+function showCanvas() {
+  $('placeholder').style.display = 'none';
+  $('canvas-wrap').style.display = 'block';
+}
+
+function showResults(preds) {
+  const list = $('results-list');
+  list.innerHTML = '';
+  if (!preds || !preds.length) {
+    const d = document.createElement('div');
+    d.id = 'no-results';
+    d.textContent = t('noResult');
+    list.appendChild(d);
+    return;
+  }
+  preds.forEach((p, i) => {
+    const zh    = LABELS_ZH[p.class] || p.class;
+    const label = isZH
+      ? zh + (zh !== p.class ? ` (${p.class})` : '')
+      : p.class + (LABELS_ZH[p.class] ? ` (${LABELS_ZH[p.class]})` : '');
+    const conf  = Math.round(p.score * 100);
+    const color = COLORS[i % COLORS.length];
+    const div   = document.createElement('div');
+    div.className = 'result-item';
+    div.style.borderLeftColor = color;
+    div.innerHTML = `
+      <div style="flex:1">
+        <div class="result-label">${label}</div>
+        <div class="conf-bar"><div class="conf-fill" style="width:${conf}%;background:${color}"></div></div>
+      </div>
+      <div class="result-conf">${conf}%</div>`;
+    list.appendChild(div);
+  });
+}
+
+function drawBoxes(ctx, preds, scaleX, scaleY) {
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  preds.forEach((p, i) => {
+    const [x, y, w, h] = p.bbox;
+    const color = COLORS[i % COLORS.length];
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 2;
+    ctx.strokeRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
+    const zh   = LABELS_ZH[p.class] || p.class;
+    const lbl  = isZH ? zh : p.class;
+    const conf = Math.round(p.score * 100) + '%';
+    const txt  = `${lbl} ${conf}`;
+    ctx.font = 'bold 13px system-ui';
+    const tw = ctx.measureText(txt).width;
+    ctx.fillStyle = color;
+    ctx.fillRect(x * scaleX - 1, y * scaleY - 20, tw + 10, 20);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(txt, x * scaleX + 4, y * scaleY - 5);
+  });
+}
+
+async function handleFile(e) {
+  if (!model) return;
+  stopLive();
+  const file = e.target.files[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = async () => {
+    showCanvas();
+    const wrap  = $('canvas-wrap');
+    const video = $('video');
+    video.style.display = 'none';
+    let imgEl = wrap.querySelector('#static-img');
+    if (!imgEl) {
+      imgEl = document.createElement('img');
+      imgEl.id = 'static-img';
+      imgEl.style.cssText = 'width:100%;height:auto;max-height:62vh;object-fit:contain;display:block';
+      wrap.insertBefore(imgEl, video);
+    }
+    imgEl.src = img.src;
+    imgEl.style.display = 'block';
+    setStatus('statusDetecting', 'loading');
+    const preds = await model.detect(img);
+    const ov    = $('overlay');
+    ov.width  = img.naturalWidth;
+    ov.height = img.naturalHeight;
+    ov.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
+    drawBoxes(ov.getContext('2d'), preds, 1, 1);
+    setStatus('statusDone', 'ready');
+    showResults(preds);
+  };
+  img.src = URL.createObjectURL(file);
+  e.target.value = '';
+}
+
+async function captureMode() {
+  if (!model) return;
+  stopLive();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const video  = $('video');
+    const imgEl  = document.getElementById('static-img');
+    if (imgEl) imgEl.style.display = 'none';
+    video.style.display = 'block';
+    showCanvas();
+    video.srcObject = stream;
+    await video.play();
+    setStatus('statusDetecting', 'loading');
+    setTimeout(async () => {
+      const ov = $('overlay');
+      const vw = video.videoWidth, vh = video.videoHeight;
+      ov.width = vw; ov.height = vh;
+      const preds = await model.detect(video);
+      const sx = video.offsetWidth / vw, sy = video.offsetHeight / vh;
+      drawBoxes(ov.getContext('2d'), preds, sx, sy);
+      stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+      setStatus('statusDone', 'ready');
+      showResults(preds);
+    }, 800);
+  } catch (err) {
+    setStatus('statusError', 'error');
+  }
+}
+
+async function liveMode() {
+  if (!model) return;
+  if (liveRunning) { stopLive(); return; }
+  stopLive();
+  const imgEl = document.getElementById('static-img');
+  if (imgEl) imgEl.style.display = 'none';
+  try {
+    liveStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+    const video = $('video');
+    video.style.display = 'block';
+    showCanvas();
+    video.srcObject = liveStream;
+    await video.play();
+    liveRunning = true;
+    $('btn-live').classList.add('active');
+    setStatus('statusLive', 'ready');
+    const ov = $('overlay');
+    async function detect() {
+      if (!liveRunning) return;
+      if (video.readyState === 4) {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (ov.width !== vw || ov.height !== vh) { ov.width = vw; ov.height = vh; }
+        const preds = await model.detect(video);
+        const sx = video.offsetWidth / vw, sy = video.offsetHeight / vh;
+        drawBoxes(ov.getContext('2d'), preds, sx, sy);
+        showResults(preds);
+      }
+      if (liveRunning) requestAnimationFrame(detect);
+    }
+    detect();
+  } catch (err) {
+    setStatus('statusError', 'error');
+  }
+}
+
+function stopLive() {
+  liveRunning = false;
+  if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; }
+  $('btn-live').classList.remove('active');
+  const ov = $('overlay');
+  if (ov && ov.getContext) ov.getContext('2d').clearRect(0, 0, ov.width, ov.height);
+}
+
+loadModel();
+</script>
+</body>
+</html>
