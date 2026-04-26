@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>目标检测 / Object Detection</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+<style>
+:root {
+  --glass-bg: rgba(255,255,255,0.12);
+  --glass-border: rgba(255,255,255,0.25);
+  --glass-blur: blur(24px) saturate(180%);
+  --glass-dark: rgba(0,0,0,0.25);
+  --accent: #60a5fa;
+  --accent2: #a78bfa;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --text: rgba(255,255,255,0.95);
+  --text-muted: rgba(255,255,255,0.55);
+  --radius: 20px;
+  --radius-sm: 12px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+body {
+  font-family: -apple-system, 'SF Pro Display', system-ui, sans-serif;
+  min-height: 100vh;
+  background: #0a0a1a;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  max-width: 480px;
+  margin: 0 auto;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Ambient background orbs */
+.orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 0;
+  animation: drift 12s ease-in-out infinite alternate;
+}
+.orb1 { width: 320px; height: 320px; background: radial-gradient(circle, #3b82f6, transparent); top: -80px; left: -80px; }
+.orb2 { width: 280px; height: 280px; background: radial-gradient(circle, #8b5cf6, transparent); top: 200px; right: -100px; animation-delay: -4s; }
+.orb3 { width: 260px; height: 260px; background: radial-gradient(circle, #06b6d4, transparent); bottom: 100px; left: -60px; animation-delay: -8s; }
+@keyframes drift {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(20px, 30px) scale(1.08); }
+}
+
+/* Glass mixin utility */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+}
+
+/* Header */
+#header {
+  position: relative; z-index: 10;
+  padding: 16px 20px 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(30px) saturate(200%);
+  -webkit-backdrop-filter: blur(30px) saturate(200%);
+  border-bottom: 1px solid var(--glass-border);
+}
+#header-left h1 {
+  font-size: 20px; font-weight: 700;
+  background: linear-gradient(135deg, #fff 0%, var(--accent) 60%, var(--accent2) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text; letter-spacing: -0.3px;
+}
+#header-left p { font-size: 11px; color: var(--text-muted); margin-top: 1px; letter-spacing: 0.5px; }
+#header-right { display: flex; gap: 8px; align-items: center; }
+.hdr-btn {
+  padding: 6px 14px; border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  color: var(--text); font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s;
+}
+.hdr-btn:active { transform: scale(0.95); background: rgba(255,255,255,0.2); }
+
+/* Main viewport */
+#main {
+  position: relative; z-index: 5;
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.4);
+  overflow: hidden; min-height: 340px;
+}
+#placeholder {
+  text-align: center; padding: 2.5rem 2rem;
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+}
+.ph-icon {
+  width: 72px; height: 72px;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  position: relative;
+}
+.ph-icon::before {
+  content: '';
+  position: absolute; inset: -1px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(96,165,250,0.4), rgba(167,139,250,0.4), transparent);
+  z-index: -1;
+}
+.ph-icon svg { opacity: 0.6; }
+#placeholder h2 { font-size: 17px; font-weight: 600; color: var(--text); }
+#placeholder p  { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+
+#canvas-wrap { position: relative; width: 100%; display: none; }
+#video, #static-img {
+  display: block; width: 100%; height: auto;
+  max-height: 58vh; object-fit: contain;
+}
+#overlay {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; pointer-events: none;
+}
+
+/* Status pill */
+#status-bar {
+  position: relative; z-index: 10;
+  padding: 10px 20px;
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(0,0,0,0.3);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.pulse-ring {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #444; flex-shrink: 0;
+  position: relative; transition: background 0.3s;
+}
+.pulse-ring.loading { background: var(--amber); }
+.pulse-ring.loading::after {
+  content: '';
+  position: absolute; inset: -3px; border-radius: 50%;
+  border: 2px solid var(--amber); opacity: 0;
+  animation: ripple 1.2s ease-out infinite;
+}
+.pulse-ring.ready { background: var(--green); }
+.pulse-ring.error { background: var(--red); }
+@keyframes ripple {
+  0%   { transform: scale(0.8); opacity: 0.8; }
+  100% { transform: scale(2);   opacity: 0; }
+}
+#status-text { font-size: 12px; color: var(--text-muted); flex: 1; }
+#obj-count {
+  font-size: 11px; font-weight: 600; padding: 3px 10px;
+  border-radius: 10px;
+  background: rgba(96,165,250,0.15);
+  border: 1px solid rgba(96,165,250,0.3);
+  color: var(--accent); display: none;
+}
+
+/* Results */
+#results {
+  position: relative; z-index: 10;
+  padding: 12px 16px;
+  background: rgba(0,0,0,0.2);
+  max-height: 210px; overflow-y: auto;
+}
+#results::-webkit-scrollbar { width: 3px; }
+#results::-webkit-scrollbar-track { background: transparent; }
+#results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+#results-list { display: flex; flex-direction: column; gap: 8px; }
+.result-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.12);
+  transition: background 0.2s;
+}
+.result-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+.result-info { flex: 1; min-width: 0; }
+.result-label { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+.conf-pill {
+  font-size: 12px; font-weight: 700;
+  padding: 3px 9px; border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  flex-shrink: 0;
+}
+.conf-bar-wrap { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); margin-top: 5px; overflow: hidden; }
+.conf-bar { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+#no-results { color: var(--text-muted); font-size: 13px; text-align: center; padding: 14px 0; }
+
+/* Toolbar */
+#toolbar {
+  position: relative; z-index: 10;
+  padding: 14px 16px 20px;
+  display: flex; gap: 10px;
+  background: rgba(0,0,0,0.3);
+  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  border-top: 1px solid var(--glass-border);
+}
+.tool-btn {
+  flex: 1; padding: 13px 6px 11px; border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  color: rgba(255,255,255,0.7); font-size: 11px; font-weight: 500;
+  cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  transition: all 0.2s; letter-spacing: 0.3px;
+  position: relative; overflow: hidden;
+}
+.tool-btn::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+}
+.tool-btn svg { opacity: 0.75; transition: opacity 0.2s; }
+.tool-btn:active { transform: scale(0.96); background: rgba(255,255,255,0.15); }
+.tool-btn.active {
+  background: rgba(96,165,250,0.2);
+  border-color: rgba(96,165,250,0.45);
+  color: var(--accent);
+  box-shadow: 0 0 16px rgba(96,165,250,0.2);
+}
+.tool-btn.active svg { opacity: 1; }
+.tool-btn.active::before {
+  background: linear-gradient(90deg, transparent, rgba(96,165,250,0.5), transparent);
+}
+#file-input { display: none; }
+
+/* Confidence bar colors */
+.bar-high   { background: linear-gradient(90deg, #34d399, #6ee7b7); }
+.bar-mid    { background: linear-gradient(90deg, #fbbf24, #fcd34d); }
+.bar-low    { background: linear-gradient(90deg, #f87171, #fca5a5); }
+</style>
+</head>
+<body>
+
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+<div class="orb orb3"></div>
+
+<div id="header">
+  <div id="header-left">
+    <h1 id="title-main">视觉检测</h1>
+    <p id="title-sub">OBJECT DETECTION · AI POWERED</p>
+  </div>
+  <div id="header-right">
+    <button class="hdr-btn" onclick="toggleLang()" id="lang-btn">EN</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="placeholder">
+    <div class="ph-icon">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <rect x="2" y="2" width="10" height="10" rx="1.5" stroke="white" stroke-width="1.5" fill="none"/>
+        <rect x="20" y="2" width="10" height="10" rx="1.5" stroke="white" stroke-width="1.5" fill="none"/>
+        <rect x="2" y="20" width="10" height="10" rx="1.5" stroke="white" stroke-width="1.5" fill="none"/>
+        <rect x="20" y="20" width="10" height="10" rx="1.5" stroke="white" stroke-width="1.5" fill="none"/>
+        <rect x="10" y="10" width="12" height="12" rx="2" stroke="rgba(255,255,255,0.5)" stroke-width="1.2" fill="none" stroke-dasharray="2 2"/>
+      </svg>
+    </div>
+    <div>
+      <h2 id="ph-title">选择检测模式</h2>
+      <p id="ph-desc">支持上传图片、拍照或实时摄像头<br>Powered by COCO-SSD · 80+ 类别</p>
+    </div>
+  </div>
+  <div id="canvas-wrap">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+</div>
+
+<div id="status-bar">
+  <div class="pulse-ring loading" id="status-dot"></div>
+  <span id="status-text">正在加载 AI 模型…</span>
+  <span id="obj-count"></span>
+</div>
+
+<div id="results">
+  <div id="results-list"></div>
+</div>
+
+<div id="toolbar">
+  <label class="tool-btn" for="file-input" id="btn-upload">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <span id="btn-upload-lbl">上传图片</span>
+  </label>
+  <input type="file" id="file-input" accept="image/*" onchange="handleFile(event)">
+
+  <button class="tool-btn" id="btn-snap" onclick="captureMode()">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+      <circle cx="12" cy="13" r="4"/>
+    </svg>
+    <span id="btn-snap-lbl">拍照检测</span>
+  </button>
+
+  <button class="tool-btn" id="btn-live" onclick="toggleLive()">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M6.3 6.3a8 8 0 000 11.4M17.7 6.3a8 8 0 010 11.4"/>
+      <path d="M3.5 3.5a13 13 0 000 17M20.5 3.5a13 13 0 010 17"/>
+    </svg>
+    <span id="btn-live-lbl">实时检测</span>
+  </button>
+</div>
+
+<script>
+const LABELS_ZH = {
+  person:'人',car:'汽车',truck:'货车',bus:'公共汽车',motorcycle:'摩托车',bicycle:'自行车',
+  dog:'狗',cat:'猫',bird:'鸟',horse:'马',cow:'牛',sheep:'羊',elephant:'大象',
+  bear:'熊',zebra:'斑马',giraffe:'长颈鹿',
+  chair:'椅子',couch:'沙发',bed:'床',toilet:'马桶',
+  'dining table':'餐桌',tv:'电视',laptop:'笔记本电脑',mouse:'鼠标',keyboard:'键盘',
+  'cell phone':'手机',book:'书',bottle:'瓶子',cup:'杯子',
+  'sports ball':'球',backpack:'背包',umbrella:'雨伞',handbag:'手提包',
+  suitcase:'行李箱','traffic light':'交通灯','stop sign':'停止标志',
+  airplane:'飞机',boat:'船',clock:'时钟',vase:'花瓶',scissors:'剪刀',
+  'potted plant':'盆栽',banana:'香蕉',apple:'苹果',pizza:'披萨',
+  'hot dog':'热狗',cake:'蛋糕',sandwich:'三明治',donut:'甜甜圈',
+  fork:'叉子',knife:'刀',spoon:'勺子',bowl:'碗',
+  refrigerator:'冰箱',microwave:'微波炉',oven:'烤箱',toaster:'烤面包机',
+  'wine glass':'酒杯',fire_hydrant:'消防栓',bench:'长椅',kite:'风筝',
+  tie:'领带',skateboard:'滑板',surfboard:'冲浪板',tennis_racket:'网球拍',baseball_bat:'棒球棒',
+  'baseball glove':'棒球手套',skis:'滑雪板',snowboard:'单板滑雪',
+  'frisbee':'飞盘',carrot:'胡萝卜',broccoli:'西兰花',orange:'橙子',
+  pizza:'披萨',pretzel:'椒盐卷饼',
+};
+
+const PALETTE = [
+  '#60a5fa','#a78bfa','#34d399','#fbbf24','#f87171',
+  '#38bdf8','#fb7185','#4ade80','#facc15','#c084fc'
+];
+
+let model = null, isZH = true, liveStream = null, liveRunning = false;
+let smoothedBoxes = {}; // for box smoothing
+
+const $ = id => document.getElementById(id);
+
+// ── Language ──────────────────────────────────────────────
+const L = {
+  titleMain:      {zh:'视觉检测',          en:'Object Detection'},
+  titleSub:       {zh:'OBJECT DETECTION · AI POWERED', en:'目标检测 · AI 驱动'},
+  statusLoading:  {zh:'正在加载 AI 模型…',   en:'Loading AI model…'},
+  statusReady:    {zh:'模型就绪，选择检测方式', en:'Model ready. Choose a mode.'},
+  statusError:    {zh:'模型加载失败，请刷新',  en:'Model failed. Please refresh.'},
+  statusDetecting:{zh:'AI 分析中…',          en:'Analyzing…'},
+  statusDone:     {zh:'检测完成',             en:'Detection complete'},
+  statusLive:     {zh:'实时检测中',           en:'Live detection on'},
+  statusStopped:  {zh:'实时检测已停止',        en:'Live detection stopped'},
+  noResult:       {zh:'未检测到目标',          en:'No objects detected'},
+  phTitle:        {zh:'选择检测模式',          en:'Choose a mode'},
+  phDesc:         {zh:'支持上传图片、拍照或实时摄像头\nPowered by COCO-SSD · 80+ 类别', en:'Upload, capture or use live camera\nPowered by COCO-SSD · 80+ classes'},
+  btnUpload:      {zh:'上传图片',              en:'Upload'},
+  btnSnap:        {zh:'拍照检测',              en:'Capture'},
+  btnLive:        {zh:'实时检测',              en:'Live'},
+  objCount:       {zh:(n)=>`${n} 个目标`,     en:(n)=>`${n} object${n>1?'s':''}`},
+};
+function t(key, arg) {
+  const v = L[key]?.[isZH?'zh':'en'];
+  return typeof v === 'function' ? v(arg) : (v || key);
+}
+function toggleLang() { isZH = !isZH; applyLang(); }
+function applyLang() {
+  $('title-main').textContent = t('titleMain');
+  $('title-sub').textContent  = t('titleSub');
+  $('lang-btn').textContent   = isZH ? 'EN' : '中';
+  $('btn-upload-lbl').textContent = t('btnUpload');
+  $('btn-snap-lbl').textContent   = t('btnSnap');
+  $('btn-live-lbl').textContent   = t('btnLive');
+  $('ph-title').textContent   = t('phTitle');
+}
+
+function setStatus(key, dot = 'ready', arg) {
+  $('status-text').textContent = t(key, arg);
+  $('status-dot').className = 'pulse-ring ' + dot;
+}
+function setCount(n) {
+  const el = $('obj-count');
+  if (n > 0) { el.style.display = 'inline'; el.textContent = t('objCount', n); }
+  else        { el.style.display = 'none'; }
+}
+
+// ── Model ─────────────────────────────────────────────────
+async function loadModel() {
+  try {
+    // Load with higher resolution for better accuracy
+    model = await cocoSsd.load({ base: 'mobilenet_v2' });
+    setStatus('statusReady', 'ready');
+  } catch (e) {
+    setStatus('statusError', 'error');
+  }
+}
+
+// ── Canvas helpers ────────────────────────────────────────
+function showCanvas() {
+  $('placeholder').style.display = 'none';
+  $('canvas-wrap').style.display = 'block';
+}
+
+// Draw rounded rect
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// Corner bracket style box
+function drawCornerBox(ctx, x, y, w, h, color) {
+  const cs = Math.min(w, h, 28); // corner size
+  const lw = 2.5;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  // Faint full rect
+  ctx.globalAlpha = 0.18;
+  ctx.strokeStyle = color;
+  roundRect(ctx, x, y, w, h, 4);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = color;
+  // TL
+  ctx.beginPath(); ctx.moveTo(x, y+cs); ctx.lineTo(x, y); ctx.lineTo(x+cs, y); ctx.stroke();
+  // TR
+  ctx.beginPath(); ctx.moveTo(x+w-cs, y); ctx.lineTo(x+w, y); ctx.lineTo(x+w, y+cs); ctx.stroke();
+  // BL
+  ctx.beginPath(); ctx.moveTo(x, y+h-cs); ctx.lineTo(x, y+h); ctx.lineTo(x+cs, y+h); ctx.stroke();
+  // BR
+  ctx.beginPath(); ctx.moveTo(x+w-cs, y+h); ctx.lineTo(x+w, y+h); ctx.lineTo(x+w, y+h-cs); ctx.stroke();
+}
+
+function drawBoxes(ctx, preds, scaleX, scaleY) {
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  preds.forEach((p, i) => {
+    const [bx, by, bw, bh] = p.bbox;
+    const x = bx * scaleX, y = by * scaleY;
+    const w = bw * scaleX, h = bh * scaleY;
+    const color = PALETTE[i % PALETTE.length];
+
+    drawCornerBox(ctx, x, y, w, h, color);
+
+    // Label pill
+    const zh  = LABELS_ZH[p.class] || p.class;
+    const lbl = isZH ? zh : p.class;
+    const conf = Math.round(p.score * 100);
+    const txt  = `${lbl}  ${conf}%`;
+    ctx.font = '600 12px -apple-system, system-ui, sans-serif';
+    const tw = ctx.measureText(txt).width;
+    const ph = 22, pw = tw + 16, pr = 6;
+    const px = x, py = y - ph - 4 < 0 ? y + 4 : y - ph - 4;
+
+    // Pill background (glass effect with alpha)
+    ctx.save();
+    roundRect(ctx, px, py, pw, ph, pr);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Pill text
+    ctx.fillStyle = '#fff';
+    ctx.font = '600 12px -apple-system, system-ui, sans-serif';
+    ctx.fillText(txt, px + 8, py + 15);
+  });
+}
+
+// ── Smoothing for live mode ───────────────────────────────
+// Exponential moving average to reduce box jitter
+const SMOOTH = 0.35; // lower = smoother, higher = more responsive
+function smoothPreds(newPreds) {
+  const next = {};
+  newPreds.forEach((p, i) => {
+    const key = p.class + '_' + i;
+    const prev = smoothedBoxes[key];
+    if (prev) {
+      p.bbox = [
+        prev[0] + SMOOTH * (p.bbox[0] - prev[0]),
+        prev[1] + SMOOTH * (p.bbox[1] - prev[1]),
+        prev[2] + SMOOTH * (p.bbox[2] - prev[2]),
+        prev[3] + SMOOTH * (p.bbox[3] - prev[3]),
+      ];
+    }
+    next[key] = p.bbox;
+  });
+  smoothedBoxes = next;
+  return newPreds;
+}
+
+// ── Results panel ─────────────────────────────────────────
+function showResults(preds) {
+  const list = $('results-list');
+  list.innerHTML = '';
+  setCount(preds ? preds.length : 0);
+  if (!preds || !preds.length) {
+    const d = document.createElement('div');
+    d.id = 'no-results'; d.textContent = t('noResult');
+    list.appendChild(d); return;
+  }
+  preds.forEach((p, i) => {
+    const color = PALETTE[i % PALETTE.length];
+    const zh    = LABELS_ZH[p.class] || p.class;
+    const enLbl = p.class;
+    const conf  = Math.round(p.score * 100);
+    const barCls = conf >= 70 ? 'bar-high' : conf >= 45 ? 'bar-mid' : 'bar-low';
+    const div = document.createElement('div');
+    div.className = 'result-item';
+    div.innerHTML = `
+      <div class="result-dot" style="background:${color};color:${color}"></div>
+      <div class="result-info">
+        <div class="result-label">${isZH ? zh : enLbl}</div>
+        <div class="result-sub">${isZH ? enLbl : zh}</div>
+        <div class="conf-bar-wrap"><div class="conf-bar ${barCls}" style="width:${conf}%"></div></div>
+      </div>
+      <div class="conf-pill" style="color:${color}">${conf}%</div>`;
+    list.appendChild(div);
+  });
+}
+
+// ── Filter low-confidence predictions ────────────────────
+function filterPreds(preds, threshold = 0.40) {
+  return preds
+    .filter(p => p.score >= threshold)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12);
+}
+
+// ── File upload ───────────────────────────────────────────
+async function handleFile(e) {
+  if (!model) return;
+  stopLive();
+  const file = e.target.files[0]; if (!file) return;
+  const img = new Image();
+  img.onload = async () => {
+    showCanvas();
+    const wrap  = $('canvas-wrap');
+    const video = $('video');
+    video.style.display = 'none';
+    let imgEl = document.getElementById('static-img');
+    if (!imgEl) {
+      imgEl = document.createElement('img');
+      imgEl.id = 'static-img';
+      imgEl.style.cssText = 'width:100%;height:auto;max-height:58vh;object-fit:contain;display:block';
+      wrap.insertBefore(imgEl, video);
+    }
+    imgEl.src = img.src; imgEl.style.display = 'block';
+    setStatus('statusDetecting', 'loading');
+    const raw  = await model.detect(img);
+    const preds = filterPreds(raw);
+    const ov = $('overlay');
+    ov.width = img.naturalWidth; ov.height = img.naturalHeight;
+    ov.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
+    drawBoxes(ov.getContext('2d'), preds, 1, 1);
+    setStatus('statusDone', 'ready');
+    showResults(preds);
+  };
+  img.src = URL.createObjectURL(file);
+  e.target.value = '';
+}
+
+// ── Capture mode ──────────────────────────────────────────
+async function captureMode() {
+  if (!model) return;
+  stopLive();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const video = $('video');
+    const imgEl = document.getElementById('static-img');
+    if (imgEl) imgEl.style.display = 'none';
+    video.style.display = 'block';
+    showCanvas();
+    video.srcObject = stream;
+    await video.play();
+    setStatus('statusDetecting', 'loading');
+    // Wait for stable frame
+    await new Promise(r => setTimeout(r, 900));
+    const raw   = await model.detect(video);
+    const preds = filterPreds(raw);
+    const ov = $('overlay');
+    const vw = video.videoWidth, vh = video.videoHeight;
+    ov.width = vw; ov.height = vh;
+    const sx = video.offsetWidth / vw, sy = video.offsetHeight / vh;
+    drawBoxes(ov.getContext('2d'), preds, sx, sy);
+    stream.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+    setStatus('statusDone', 'ready');
+    showResults(preds);
+  } catch (err) {
+    setStatus('statusError', 'error');
+  }
+}
+
+// ── Live mode ─────────────────────────────────────────────
+let frameCount = 0;
+async function toggleLive() {
+  if (!model) return;
+  if (liveRunning) { stopLive(); return; }
+  stopLive();
+  const imgEl = document.getElementById('static-img');
+  if (imgEl) imgEl.style.display = 'none';
+  try {
+    liveStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const video = $('video');
+    video.style.display = 'block';
+    showCanvas();
+    video.srcObject = liveStream;
+    await video.play();
+    liveRunning = true;
+    smoothedBoxes = {};
+    frameCount = 0;
+    $('btn-live').classList.add('active');
+    setStatus('statusLive', 'ready');
+    const ov = $('overlay');
+
+    // Run detection every N frames for smoothness (not every frame)
+    let lastPreds = [];
+    async function detect() {
+      if (!liveRunning) return;
+      if (video.readyState === 4) {
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (ov.width !== vw || ov.height !== vh) { ov.width = vw; ov.height = vh; }
+        const sx = video.offsetWidth / vw, sy = video.offsetHeight / vh;
+
+        // Run model every 3 frames to reduce jitter & increase smoothness
+        if (frameCount % 3 === 0) {
+          const raw = await model.detect(video);
+          lastPreds = filterPreds(raw, 0.45);
+          lastPreds = smoothPreds(lastPreds);
+          showResults(lastPreds);
+        }
+        drawBoxes(ov.getContext('2d'), lastPreds, sx, sy);
+        frameCount++;
+      }
+      if (liveRunning) requestAnimationFrame(detect);
+    }
+    detect();
+  } catch (err) {
+    setStatus('statusError', 'error');
+  }
+}
+
+function stopLive() {
+  liveRunning = false;
+  smoothedBoxes = {};
+  if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; }
+  $('btn-live').classList.remove('active');
+  const ov = $('overlay');
+  if (ov && ov.getContext) ov.getContext('2d').clearRect(0, 0, ov.width, ov.height);
+  if (liveRunning === false && $('status-dot').className.includes('ready')) {
+    setStatus('statusReady', 'ready');
+    setCount(0);
+  }
+}
+
+loadModel();
+</script>
+</body>
+</html>
